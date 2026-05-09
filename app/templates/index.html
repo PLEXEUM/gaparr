@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Stats Row -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div class="stat-box">
+            <div class="text-2xl font-bold" style="color: var(--accent);" id="stat-missing">-</div>
+            <div class="text-xs uppercase tracking-wide mt-1" style="color: var(--text-secondary);">Missing Movies</div>
+        </div>
+        <div class="stat-box">
+            <div class="text-2xl font-bold" style="color: var(--success);" id="stat-synced-today">-</div>
+            <div class="text-xs uppercase tracking-wide mt-1" style="color: var(--text-secondary);">Synced Today</div>
+        </div>
+        <div class="stat-box">
+            <div class="text-2xl font-bold" style="color: var(--warning);" id="stat-remaining">-</div>
+            <div class="text-xs uppercase tracking-wide mt-1" style="color: var(--text-secondary);">Remaining Today</div>
+        </div>
+        <div class="stat-box">
+            <div class="text-2xl font-bold" style="color: var(--info);" id="stat-limit">-</div>
+            <div class="text-xs uppercase tracking-wide mt-1" style="color: var(--text-secondary);">Daily Limit</div>
+        </div>
+    </div>
+
+    <!-- Action Bar -->
+    <div class="card rounded-xl overflow-hidden">
+        <div class="p-4 flex items-center justify-between flex-wrap gap-3">
+            <div class="flex items-center gap-3">
+                <button onclick="triggerSync(false)" id="sync-btn" class="btn-raise px-4 py-2 rounded-lg text-sm font-medium text-white" style="background: var(--accent);">
+                    ▶ Sync Now
+                </button>
+                <button onclick="triggerSync(true)" id="dryrun-btn" class="btn-raise px-4 py-2 rounded-lg text-sm border" style="border-color: var(--border-color); color: var(--text-secondary);">
+                    🔍 Dry Run (Preview)
+                </button>
+                <button onclick="loadStatus()" class="btn-raise px-4 py-2 rounded-lg text-sm border" style="border-color: var(--border-color); color: var(--text-secondary);">
+                    ↻ Refresh
+                </button>
+            </div>
+            <div class="text-sm" style="color: var(--text-secondary);">
+                Last sync: <span id="last-sync">Never</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Missing Movies Table -->
+    <div class="card rounded-xl overflow-hidden">
+        <div class="card-header">
+            <svg class="card-header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path>
+            </svg>
+            <div>
+                <h2 class="card-header-title">Missing Movies</h2>
+                <p class="card-header-subtitle">Movies missing from your collections</p>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Year</th>
+                        <th>Collection</th>
+                        <th>Release Date</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="missing-table-body">
+                    <tr>
+                        <td colspan="5" class="text-center py-8" style="color: var(--text-secondary);">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="more-movies-container" class="p-4 text-center border-t" style="border-color: var(--border-color); display: none;">
+            <button onclick="loadMoreMovies()" class="btn-sm btn-outline">Load More</button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    let allMissingMovies = [];
+    let displayedMovieCount = 20;
+    let currentStatus = null;
+
+    window.addEventListener('DOMContentLoaded', () => {
+        loadStatus();
+        // Auto-refresh every 30 seconds
+        setInterval(loadStatus, 30000);
+    });
+
+    async function loadStatus() {
+        try {
+            const res = await fetch('/api/sync/status');
+            const data = await res.json();
+            currentStatus = data;
+
+            if (!data.configured) {
+                document.getElementById('stat-missing').textContent = '!';
+                document.getElementById('stat-synced-today').textContent = 'N/A';
+                document.getElementById('stat-remaining').textContent = 'N/A';
+                document.getElementById('stat-limit').textContent = 'N/A';
+                document.getElementById('missing-table-body').innerHTML = `
+                    <tr>
+                        <td colspan="5" class="text-center py-8" style="color: var(--warning);">
+                            ⚠️ ${data.message || 'Radarr or TMDB not configured. Please go to Settings.'}
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            document.getElementById('stat-missing').textContent = data.total_missing || 0;
+            document.getElementById('stat-synced-today').textContent = data.synced_today || 0;
+            document.getElementById('stat-remaining').textContent = data.remaining_today || 0;
+            document.getElementById('stat-limit').textContent = data.daily_limit || 5;
+
+            if (data.last_sync_date) {
+                document.getElementById('last-sync').textContent = data.last_sync_date;
+            }
+
+            allMissingMovies = data.missing_movies || [];
+            displayedMovieCount = 20;
+            renderMovieTable();
+
+        } catch (e) {
+            console.error('Failed to load status:', e);
+            showToast('Failed to load status', 'error');
+        }
+    }
+
+    function renderMovieTable() {
+        const tbody = document.getElementById('missing-table-body');
+        const moreContainer = document.getElementById('more-movies-container');
+        
+        if (!allMissingMovies || allMissingMovies.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center py-8" style="color: var(--success);">
+                        ✅ No missing movies found! Your collections are complete.
+                    </td>
+                </tr>
+            `;
+            moreContainer.style.display = 'none';
+            return;
+        }
+
+        const toShow = allMissingMovies.slice(0, displayedMovieCount);
+        
+        tbody.innerHTML = toShow.map(movie => `
+            <tr>
+                <td class="font-medium" style="color: var(--text-primary);">${escapeHtml(movie.title)}</td>
+                <td style="color: var(--text-secondary);">${movie.year || 'N/A'}</td>
+                <td style="color: var(--text-secondary);">${escapeHtml(movie.collection_name)}</td>
+                <td style="color: var(--text-secondary);">${movie.release_date || 'Unknown'}</td>
+                <td>
+                    <button onclick="addSingleMovie(${movie.tmdb_id}, '${escapeHtml(movie.title)}')" 
+                        class="btn-sm btn-primary">
+                        Add to Radarr
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+
+        // Show/hide "Load More" button
+        if (allMissingMovies.length > displayedMovieCount) {
+            moreContainer.style.display = 'block';
+        } else {
+            moreContainer.style.display = 'none';
+        }
+    }
+
+    function loadMoreMovies() {
+        displayedMovieCount += 20;
+        renderMovieTable();
+    }
+
+    async function addSingleMovie(tmdbId, title) {
+        // This would call a new API endpoint to add a single movie
+        // For now, we'll show a toast and suggest using full sync
+        showToast(`Single movie addition coming soon. Use "Sync Now" to add ${title}`, 'info');
+    }
+
+    async function triggerSync(dryRun) {
+        const syncBtn = document.getElementById('sync-btn');
+        const dryrunBtn = document.getElementById('dryrun-btn');
+        
+        syncBtn.disabled = true;
+        dryrunBtn.disabled = true;
+        syncBtn.textContent = dryRun ? '⏳ Previewing...' : '⏳ Syncing...';
+        
+        try {
+            const res = await fetch('/api/sync/trigger', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dry_run: dryRun })
+            });
+            
+            const data = await res.json();
+            
+            if (res.ok) {
+                if (dryRun && data.dry_run) {
+                    showToast(`Dry run: Would add ${data.would_add} movies today`, 'info');
+                    if (data.movies && data.movies.length > 0) {
+                        console.log('Would add:', data.movies);
+                    }
+                } else if (!dryRun) {
+                    showToast('Sync started in background', 'success');
+                }
+                
+                // Reload status after a delay
+                setTimeout(() => loadStatus(), 3000);
+            } else {
+                showToast(data.detail || 'Sync failed', 'error');
+            }
+        } catch (e) {
+            showToast('Request failed: ' + e.message, 'error');
+        } finally {
+            syncBtn.disabled = false;
+            dryrunBtn.disabled = false;
+            syncBtn.textContent = '▶ Sync Now';
+            dryrunBtn.textContent = '🔍 Dry Run (Preview)';
+        }
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+</script>
+{% endblock %}

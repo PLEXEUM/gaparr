@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    
+    <div class="card rounded-xl overflow-hidden mb-6">
+        <div class="card-header">
+            <svg class="card-header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            <div>
+                <h2 class="card-header-title">Application Logs</h2>
+                <p class="card-header-subtitle">View Gaparr activity and debug information</p>
+            </div>
+            <div class="ml-auto flex gap-2">
+                <button onclick="downloadLogs()" class="btn-sm btn-outline">
+                    ⬇ Download
+                </button>
+                <button onclick="clearLogs()" class="btn-sm btn-danger">
+                    🗑 Clear
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Controls -->
+    <div class="card rounded-xl p-4 mb-4">
+        <div class="flex items-center gap-4 flex-wrap">
+            <div class="flex items-center gap-2">
+                <label class="text-sm">Filter:</label>
+                <select id="log-filter" onchange="filterLogs()"
+                    class="px-3 py-1 rounded-lg text-sm border"
+                    style="background: var(--bg-primary); border-color: var(--border-color); color: var(--text-primary);">
+                    <option value="ALL">All</option>
+                    <option value="INFO">Info</option>
+                    <option value="WARNING">Warning</option>
+                    <option value="ERROR">Error</option>
+                    <option value="DEBUG">Debug</option>
+                </select>
+            </div>
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="auto-scroll" checked class="accent-indigo-500" />
+                <span class="text-sm">Auto-scroll</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="auto-refresh" checked class="accent-indigo-500" />
+                <span class="text-sm">Auto-refresh (5s)</span>
+            </label>
+            <button onclick="loadLogs()" class="btn-raise px-3 py-1 rounded-lg text-sm border"
+                style="border-color: var(--border-color); color: var(--text-secondary);">
+                ↻ Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Log Viewer -->
+    <div class="card rounded-xl overflow-hidden">
+        <div id="log-viewer"
+            class="p-4 font-mono text-xs overflow-y-auto"
+            style="height: 500px; background: var(--bg-primary);">
+            <div id="log-content">Loading...</div>
+        </div>
+    </div>
+
+    <p id="log-meta" class="text-xs mt-2" style="color: var(--text-secondary)"></p>
+
+</div>
+
+<!-- Clear Logs Dialog -->
+<div id="clear-dialog" class="hidden fixed inset-0 flex items-center justify-center z-50"
+    style="background: rgba(0,0,0,0.6)">
+    <div class="card rounded-xl p-6 max-w-sm w-full mx-4">
+        <h3 class="font-semibold mb-2">Clear Logs</h3>
+        <p class="text-sm mb-6" style="color: var(--text-secondary);">
+            This will clear all log entries from the display. The log file will still exist on disk.
+        </p>
+        <div class="flex gap-3">
+            <button onclick="confirmClearLogs()" class="btn-raise flex-1 py-2 rounded-lg text-sm font-medium"
+                style="background: #ef4444; color: white;">Clear</button>
+            <button onclick="closeClearDialog()"
+                class="btn-raise flex-1 py-2 rounded-lg text-sm border"
+                style="border-color: var(--border-color);">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let allLines = [];
+    let autoRefreshInterval = null;
+
+    window.addEventListener('DOMContentLoaded', () => {
+        loadLogs();
+        setupAutoRefresh();
+    });
+
+    window.addEventListener('beforeunload', () => {
+        if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+    });
+
+    async function loadLogs() {
+        try {
+            const res = await fetch('/api/logs');
+            const data = await res.json();
+            // Since we don't have a logs API yet, we'll simulate with a message
+            // In production, you'd implement a proper logs endpoint
+            document.getElementById('log-content').innerHTML = getSimulatedLogs();
+            document.getElementById('log-meta').textContent = 'Showing simulated logs. In production, logs would come from /api/logs';
+            allLines = [];
+        } catch (e) {
+            document.getElementById('log-content').innerHTML = 'Failed to load logs: ' + e.message;
+        }
+    }
+
+    function getSimulatedLogs() {
+        const now = new Date();
+        const timestamp = now.toISOString().slice(0, 19).replace('T', ' ');
+        
+        return `
+            <div style="color: #86efac;">${timestamp} [INFO] Gaparr started successfully on port 7117</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Scheduled daily sync at 02:00</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Data directory: data</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Radarr configuration loaded</div>
+            <div style="color: #86efac;">${timestamp} [INFO] TMDB configuration loaded</div>
+            <div style="color: #fbbf24;">${timestamp} [WARNING] Daily limit reached, no more movies today</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Fetching 1247 movies from Radarr...</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Found 1247 movies in Radarr</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Finding collection gaps from TMDB...</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Found 23 missing movies from 8 collections</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Adding to Radarr: Aliens (1986)</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Successfully added: Aliens</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Adding to Radarr: Alien³ (1992)</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Successfully added: Alien³</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Adding to Radarr: Alien: Resurrection (1997)</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Successfully added: Alien: Resurrection</div>
+            <div style="color: #86efac;">${timestamp} [INFO] Sync complete: added 3 movies</div>
+        `;
+    }
+
+    function filterLogs() {
+        const filter = document.getElementById('log-filter').value;
+        const logContent = document.getElementById('log-content');
+        const lines = logContent.innerHTML.split('</div>');
+        
+        if (filter === 'ALL') {
+            // Just refresh
+            loadLogs();
+            return;
+        }
+        
+        // Simple filter for demo
+        const filtered = lines.filter(line => line.includes(`[${filter}]`));
+        if (filtered.length === 0) {
+            logContent.innerHTML = '<div style="color: var(--text-secondary);">No matching log entries found.</div>';
+        } else {
+            logContent.innerHTML = filtered.join('</div>');
+        }
+    }
+
+    function setupAutoRefresh() {
+        const autoRefreshCheckbox = document.getElementById('auto-refresh');
+        
+        function startAutoRefresh() {
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            autoRefreshInterval = setInterval(() => {
+                if (autoRefreshCheckbox.checked) {
+                    loadLogs();
+                }
+            }, 5000);
+        }
+        
+        startAutoRefresh();
+        
+        autoRefreshCheckbox.addEventListener('change', () => {
+            if (autoRefreshCheckbox.checked) {
+                startAutoRefresh();
+            } else {
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            }
+        });
+    }
+
+    function downloadLogs() {
+        const logContent = document.getElementById('log-content').innerText;
+        const blob = new Blob([logContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `gaparr_logs_${new Date().toISOString().slice(0, 19)}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Logs downloaded', 'success');
+    }
+
+    function clearLogs() {
+        document.getElementById('clear-dialog').classList.remove('hidden');
+    }
+
+    function closeClearDialog() {
+        document.getElementById('clear-dialog').classList.add('hidden');
+    }
+
+    function confirmClearLogs() {
+        // In a real implementation, you'd call an API endpoint
+        document.getElementById('log-content').innerHTML = '<div style="color: var(--text-secondary);">Logs cleared. New logs will appear as activity occurs.</div>';
+        closeClearDialog();
+        showToast('Logs cleared from display', 'info');
+    }
+</script>
+{% endblock %}
