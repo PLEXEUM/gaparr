@@ -43,6 +43,20 @@
         </div>
     </div>
 
+    <!-- Scan Progress Indicator (hidden by default) -->
+    <div id="scan-progress" class="card rounded-xl overflow-hidden mb-6" style="display: none;">
+        <div class="p-4">
+            <div class="flex items-center justify-between mb-2">
+                <span id="scan-status" class="text-sm font-medium" style="color: var(--accent);">Scanning...</span>
+                <span id="scan-percent" class="text-sm" style="color: var(--text-secondary);">0%</span>
+            </div>
+            <div class="w-full rounded-full h-2" style="background: var(--border-color);">
+                <div id="scan-progress-bar" class="h-2 rounded-full transition-all duration-300" style="width: 0%; background: var(--accent);"></div>
+            </div>
+            <p id="scan-movie" class="text-xs mt-2" style="color: var(--text-secondary);">Preparing...</p>
+        </div>
+    </div>
+
     <!-- Missing Movies Table -->
     <div class="card rounded-xl overflow-hidden">
         <div class="card-header">
@@ -221,37 +235,86 @@
     async function triggerSync(dryRun) {
         const syncBtn = document.getElementById('sync-btn');
         const dryrunBtn = document.getElementById('dryrun-btn');
-        
+        const progressDiv = document.getElementById('scan-progress');
+        const scanStatus = document.getElementById('scan-status');
+        const scanPercent = document.getElementById('scan-percent');
+        const scanBar = document.getElementById('scan-progress-bar');
+        const scanMovie = document.getElementById('scan-movie');
+    
         syncBtn.disabled = true;
         dryrunBtn.disabled = true;
         syncBtn.textContent = dryRun ? '⏳ Previewing...' : '⏳ Syncing...';
-        
+    
+        // Show progress indicator
+        progressDiv.style.display = 'block';
+        scanStatus.textContent = dryRun ? 'Dry run in progress...' : 'Syncing in progress...';
+        scanPercent.textContent = '0%';
+        scanBar.style.width = '0%';
+        scanMovie.textContent = 'Starting scan...';
+    
+        // Start polling for progress
+        let pollInterval = setInterval(async () => {
+            try {
+                const progressRes = await fetch('/api/sync/progress');
+                if (progressRes.ok) {
+                    const progress = await progressRes.json();
+                    if (progress.total > 0) {
+                        const percent = Math.round((progress.current / progress.total) * 100);
+                        scanPercent.textContent = `${percent}%`;
+                        scanBar.style.width = `${percent}%`;
+                        scanMovie.textContent = `Processing: ${progress.current_movie || '...'} (${progress.current} of ${progress.total})`;
+                    } else if (progress.status === 'scanning') {
+                        scanMovie.textContent = 'Fetching movies from Radarr...';
+                    }
+                
+                    // Stop polling when scan is done
+                    if (progress.status === 'done' || progress.status === 'error' || !progress.is_running === false) {
+                        clearInterval(pollInterval);
+                        setTimeout(() => {
+                            progressDiv.style.display = 'none';
+                        }, 1000);
+                    }
+                }
+            } catch (e) {
+                console.error('Progress poll error:', e);
+            }
+        }, 1000);
+    
         try {
             const res = await fetch('/api/sync/trigger', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ dry_run: dryRun })
             });
-            
+        
             const data = await res.json();
-            
+        
             if (res.ok) {
                 if (dryRun && data.dry_run) {
+                    scanStatus.textContent = 'Dry run complete!';
                     showToast(`Dry run: Would add ${data.would_add} movies today`, 'info');
-                    if (data.movies && data.movies.length > 0) {
-                        console.log('Would add:', data.movies);
-                    }
+                    setTimeout(() => loadStatus(), 2000);
                 } else if (!dryRun) {
+                    scanStatus.textContent = 'Sync complete!';
                     showToast('Sync started in background', 'success');
+                    setTimeout(() => loadStatus(), 3000);
+                    setTimeout(() => loadStatus(), 10000);
                 }
-                
-                // Reload status after a delay
-                setTimeout(() => loadStatus(), 3000);
             } else {
+                scanStatus.textContent = 'Scan failed';
                 showToast(data.detail || 'Sync failed', 'error');
+                clearInterval(pollInterval);
+                setTimeout(() => {
+                    progressDiv.style.display = 'none';
+                }, 2000);
             }
         } catch (e) {
+            scanStatus.textContent = 'Scan failed';
             showToast('Request failed: ' + e.message, 'error');
+            clearInterval(pollInterval);
+            setTimeout(() => {
+                progressDiv.style.display = 'none';
+            }, 2000);
         } finally {
             syncBtn.disabled = false;
             dryrunBtn.disabled = false;

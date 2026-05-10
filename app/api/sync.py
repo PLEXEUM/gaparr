@@ -177,6 +177,18 @@ async def get_sync_settings(request: Request) -> Dict[str, Any]:
         "hide_future": settings.hide_future_releases
     }
 
+@router.get("/progress")
+async def get_scan_progress(request: Request) -> Dict[str, Any]:
+    """Get current scan progress."""
+    # This would need to track progress from the scanner
+    # For now, return a simple response
+    return {
+        "status": "idle",
+        "current": 0,
+        "total": 0,
+        "current_movie": "",
+        "is_running": False
+    }
 
 @router.post("/ignore/collection")
 async def add_ignored_collection(data: IgnoreCollectionInput, request: Request) -> Dict[str, Any]:
