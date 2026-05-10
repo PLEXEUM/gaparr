@@ -1,7 +1,7 @@
 """Radarr API client - adapted from resizarr project."""
 
 import httpx
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set, Tuple
 from datetime import datetime
 import logging
 import asyncio
@@ -53,11 +53,10 @@ class RadarrClient:
         except Exception as e:
             return False, f"Connection failed: {str(e)}"
 
-    async def get_movies(self) -> List[Dict[str, Any]]:
+    async def get_movies(self, page_size: int = 100) -> List[Dict[str, Any]]:
         """Fetch all movies from Radarr (paginated)."""
         all_movies = []
         page = 1
-        page_size = 50
 
         while True:
             data = await self._request(
@@ -81,6 +80,14 @@ class RadarrClient:
         logger.info(f"Fetched {len(all_movies)} movies from Radarr")
         return all_movies
 
+    async def get_movies_batch(self, batch_size: int = 100) -> List[List[Dict[str, Any]]]:
+        """Fetch movies and return them in batches for memory efficiency."""
+        all_movies = await self.get_movies()
+        
+        # Return in batches
+        for i in range(0, len(all_movies), batch_size):
+            yield all_movies[i:i + batch_size]
+
     async def get_root_folders(self) -> List[Dict[str, Any]]:
         """Fetch available root folders from Radarr."""
         return await self._request("GET", "rootfolder")
@@ -98,16 +105,73 @@ class RadarrClient:
             else:
                 logger.info("Radarr does not provide collectionTmdbId, using TMDB API")
         return movies
-    
-    async def add_movie(self, tmdb_id: int, title: str, root_folder_path: str, quality_profile_id: Optional[int] = None) -> Dict[str, Any]:
-        """Add a movie to Radarr using TMDB ID."""
+
+    async def get_owned_tmdb_ids(self) -> Tuple[Set[int], Dict[int, Dict]]:
+        """
+        Get set of owned TMDB IDs and movie metadata.
+        Returns: (set of tmdb_ids, dict of tmdb_id -> movie_info)
+        """
+        movies = await self.get_movies()
+        owned_ids = set()
+        movie_info = {}
+        
+        for movie in movies:
+            tmdb_id = movie.get("tmdbId")
+            if tmdb_id:
+                owned_ids.add(tmdb_id)
+                movie_info[tmdb_id] = {
+                    "radarr_id": movie.get("id"),
+                    "title": movie.get("title"),
+                    "year": movie.get("year"),
+                    "has_file": movie.get("hasFile", False),
+                    "monitored": movie.get("monitored", False),
+                    "collection_id": movie.get("collectionTmdbId")  # May be None (Radarr v4+)
+                }
+        
+        logger.info(f"Found {len(owned_ids)} unique TMDB IDs in Radarr")
+        return owned_ids, movie_info
+
+    async def get_movies_by_collection(self, collection_tmdb_id: int) -> List[Dict]:
+        """Get all movies belonging to a specific collection from Radarr."""
+        movies = await self.get_movies()
+        
+        # Filter movies that belong to the collection
+        collection_movies = []
+        for movie in movies:
+            movie_collection_id = movie.get("collectionTmdbId")
+            if movie_collection_id and movie_collection_id == collection_tmdb_id:
+                collection_movies.append(movie)
+        
+        logger.info(f"Found {len(collection_movies)} movies in collection {collection_tmdb_id}")
+        return collection_movies
+
+    async def add_movie(
+        self, 
+        tmdb_id: int, 
+        title: str, 
+        root_folder_path: str, 
+        quality_profile_id: Optional[int] = None,
+        monitor: str = "movieOnly",
+        search_now: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Add a movie to Radarr using TMDB ID.
+        
+        Args:
+            tmdb_id: TMDB movie ID
+            title: Movie title
+            root_folder_path: Root folder path in Radarr
+            quality_profile_id: Quality profile ID (optional, uses Radarr default if not specified)
+            monitor: Monitoring setting ("movieOnly", "all", "none")
+            search_now: Whether to trigger search after adding
+        """
         payload = {
             "tmdbId": tmdb_id,
             "title": title,
             "rootFolderPath": root_folder_path,
             "addOptions": {
-                "monitor": "movieOnly",
-                "searchForMovie": False  # Don't auto-search, let user decide or schedule
+                "monitor": monitor,
+                "searchForMovie": search_now
             }
         }
 
@@ -116,7 +180,65 @@ class RadarrClient:
             payload["qualityProfileId"] = quality_profile_id
 
         logger.info(f"Adding movie to Radarr: {title} (TMDB: {tmdb_id})")
-        return await self._request("POST", "movie", json=payload)
+        
+        try:
+            result = await self._request("POST", "movie", json=payload)
+            logger.info(f"Successfully added {title} to Radarr")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to add {title}: {e}")
+            raise
+
+    async def add_movies_batch(
+        self,
+        movies: List[Dict],
+        root_folder_path: str,
+        quality_profile_id: Optional[int] = None,
+        delay_between: float = 0.5
+    ) -> Dict[str, Any]:
+        """
+        Add multiple movies to Radarr with a delay between requests.
+        
+        Args:
+            movies: List of dicts with 'tmdb_id' and 'title' keys
+            root_folder_path: Root folder path in Radarr
+            quality_profile_id: Quality profile ID (optional)
+            delay_between: Seconds to wait between requests
+        """
+        results = {
+            "added": [],
+            "failed": [],
+            "total": len(movies)
+        }
+        
+        for idx, movie in enumerate(movies):
+            try:
+                result = await self.add_movie(
+                    tmdb_id=movie["tmdb_id"],
+                    title=movie["title"],
+                    root_folder_path=root_folder_path,
+                    quality_profile_id=quality_profile_id
+                )
+                results["added"].append({
+                    "tmdb_id": movie["tmdb_id"],
+                    "title": movie["title"],
+                    "radarr_id": result.get("id")
+                })
+                logger.info(f"Added movie {idx + 1}/{len(movies)}: {movie['title']}")
+                
+                # Delay between requests to avoid overwhelming Radarr
+                if idx < len(movies) - 1 and delay_between > 0:
+                    await asyncio.sleep(delay_between)
+                    
+            except Exception as e:
+                logger.error(f"Failed to add {movie['title']}: {e}")
+                results["failed"].append({
+                    "tmdb_id": movie["tmdb_id"],
+                    "title": movie["title"],
+                    "error": str(e)
+                })
+        
+        return results
 
     async def trigger_search(self, movie_id: int) -> Dict[str, Any]:
         """Trigger a search for a specific movie."""
@@ -125,3 +247,55 @@ class RadarrClient:
             "name": "MoviesSearch",
             "movieIds": [movie_id]
         })
+
+    async def trigger_search_batch(self, movie_ids: List[int], delay_between: float = 1.0) -> Dict[str, Any]:
+        """Trigger searches for multiple movies."""
+        results = {
+            "triggered": [],
+            "failed": [],
+            "total": len(movie_ids)
+        }
+        
+        for idx, movie_id in enumerate(movie_ids):
+            try:
+                await self.trigger_search(movie_id)
+                results["triggered"].append(movie_id)
+                
+                if idx < len(movie_ids) - 1 and delay_between > 0:
+                    await asyncio.sleep(delay_between)
+            except Exception as e:
+                logger.error(f"Failed to trigger search for movie {movie_id}: {e}")
+                results["failed"].append({"movie_id": movie_id, "error": str(e)})
+        
+        return results
+
+    async def get_quality_profiles(self) -> List[Dict[str, Any]]:
+        """Fetch available quality profiles from Radarr."""
+        try:
+            return await self._request("GET", "qualityprofile")
+        except Exception as e:
+            logger.warning(f"Failed to fetch quality profiles: {e}")
+            return []
+
+    async def get_radarr_version(self) -> Optional[str]:
+        """Get Radarr version to determine feature support."""
+        try:
+            status = await self._request("GET", "system/status")
+            return status.get("version")
+        except Exception as e:
+            logger.warning(f"Failed to get Radarr version: {e}")
+            return None
+
+    async def supports_native_collections(self) -> bool:
+        """Check if Radarr version supports native collectionTmdbId."""
+        version = await self.get_radarr_version()
+        if not version:
+            return False
+        
+        # Radarr v4+ supports collectionTmdbId
+        parts = version.split('.')
+        if len(parts) >= 1:
+            major = int(parts[0])
+            return major >= 4
+        
+        return False

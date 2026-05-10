@@ -21,6 +21,19 @@ class SyncService:
         self.data_dir.mkdir(exist_ok=True)
         self.state_file = self.data_dir / "sync_state.json"
         self._state = self._load_state()
+        self._scan_status = {
+            "active": False,
+            "current_movie": "",
+            "total_movies": 0,
+            "processed": 0,
+            "status": "idle",  # idle, scanning, complete, error
+            "start_time": None,
+            "api_calls_made": 0,
+            "cache_hits": 0,
+            "current_batch": 0,
+            "total_batches": 0,
+            "eta_seconds": None
+        }
 
     def _load_state(self) -> Dict[str, Any]:
         """Load sync state from JSON file."""
@@ -110,6 +123,87 @@ class SyncService:
         """Get list of ignored movie TMDB IDs."""
         return self._state.get("ignored_movies", [])
 
+    def get_scan_status(self) -> dict:
+        """Get current scan status for toast notification."""
+        # Calculate ETA if scanning
+        if self._scan_status["active"] and self._scan_status["processed"] > 0 and self._scan_status["total_movies"] > 0:
+            elapsed = (datetime.now() - self._scan_status["start_time"]).total_seconds() if self._scan_status["start_time"] else 0
+            percent = self._scan_status["processed"] / self._scan_status["total_movies"]
+            if percent > 0 and elapsed > 0:
+                eta_seconds = (elapsed / percent) - elapsed
+                self._scan_status["eta_seconds"] = int(eta_seconds)
+            else:
+                self._scan_status["eta_seconds"] = None
+        
+        return self._scan_status.copy()
+
+    def update_scan_status(self, 
+                          current_movie: str = None, 
+                          processed: int = None, 
+                          total: int = None, 
+                          status: str = None,
+                          api_calls: int = None,
+                          cache_hits: int = None,
+                          current_batch: int = None,
+                          total_batches: int = None):
+        """Update scan status during sync."""
+        if current_movie is not None:
+            self._scan_status["current_movie"] = current_movie
+        if processed is not None:
+            self._scan_status["processed"] = processed
+        if total is not None:
+            self._scan_status["total_movies"] = total
+        if status is not None:
+            self._scan_status["status"] = status
+            self._scan_status["active"] = status == "scanning"
+            if status == "scanning" and not self._scan_status["start_time"]:
+                self._scan_status["start_time"] = datetime.now()
+            elif status in ["complete", "error", "idle"]:
+                self._scan_status["start_time"] = None
+                self._scan_status["eta_seconds"] = None
+        if api_calls is not None:
+            self._scan_status["api_calls_made"] = api_calls
+        if cache_hits is not None:
+            self._scan_status["cache_hits"] = cache_hits
+        if current_batch is not None:
+            self._scan_status["current_batch"] = current_batch
+        if total_batches is not None:
+            self._scan_status["total_batches"] = total_batches
+
+    def reset_scan_status(self):
+        """Reset scan status to idle."""
+        self._scan_status = {
+            "active": False,
+            "current_movie": "",
+            "total_movies": 0,
+            "processed": 0,
+            "status": "idle",
+            "start_time": None,
+            "api_calls_made": 0,
+            "cache_hits": 0,
+            "current_batch": 0,
+            "total_batches": 0,
+            "eta_seconds": None
+        }
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get TMDB cache statistics (requires TMDB service instance)."""
+        # This will be implemented by the caller since we don't have TMDB service here
+        return {
+            "available": False,
+            "message": "Call this method from TMDB service directly"
+        }
+
+    async def clear_sync_cache(self, tmdb_service: TMDBService, full_clear: bool = False) -> Dict[str, Any]:
+        """Clear TMDB cache and optionally reset sync state."""
+        result = await tmdb_service.clear_cache(full_clear)
+        
+        if full_clear:
+            # Also clear sync state? Optional - be careful with this
+            logger.info("Full cache clear requested - sync state preserved")
+        
+        return result
+
     async def sync_missing_movies(
         self,
         radarr_client: RadarrClient,
@@ -120,15 +214,21 @@ class SyncService:
     ) -> Dict[str, Any]:
         """
         Find missing collection movies and add them to Radarr, respecting daily limit.
-
+        
         Returns:
             Dict with sync results: added_count, skipped_count, missing_movies list
         """
         # Reset daily counter if needed
         self._reset_daily_counter()
+        
+        # Reset and start scan status
+        self.reset_scan_status()
+        self.update_scan_status(status="scanning", processed=0)
 
         # Get all movies currently in Radarr
         logger.info("Fetching movies from Radarr...")
+        self.update_scan_status(current_movie="Fetching movies from Radarr...")
+        
         radarr_movies = await radarr_client.get_movies()
         owned_tmdb_ids: Set[int] = set()
 
@@ -138,6 +238,10 @@ class SyncService:
                 owned_tmdb_ids.add(tmdb_id)
 
         logger.info(f"Found {len(owned_tmdb_ids)} movies in Radarr")
+        self.update_scan_status(
+            total=len(owned_tmdb_ids),
+            current_movie="Scanning collections for gaps..."
+        )
 
         # Find missing collection movies
         logger.info("Finding collection gaps from TMDB...")
@@ -146,6 +250,13 @@ class SyncService:
             hide_future=hide_future,
             ignore_collections=self.get_ignored_collections(),
             ignore_movies=self.get_ignored_movies()
+        )
+
+        # Update status with TMDB stats
+        cache_stats = tmdb_service.get_cache_stats()
+        self.update_scan_status(
+            api_calls=cache_stats.get("session_api_calls", 0),
+            cache_hits=cache_stats.get("session_cache_hits", 0)
         )
 
         # Filter out already synced movies
@@ -164,8 +275,20 @@ class SyncService:
         failed_count = 0
         added_movies = []
 
-        for movie in to_add:
+        # Update for adding phase
+        self.update_scan_status(
+            total=len(to_add),
+            processed=0,
+            current_movie="Starting to add movies to Radarr..."
+        )
+
+        for idx, movie in enumerate(to_add):
             try:
+                self.update_scan_status(
+                    current_movie=f"Adding: {movie['title']} ({movie['year']})",
+                    processed=idx + 1
+                )
+                
                 logger.info(f"Adding to Radarr: {movie['title']} ({movie['year']})")
                 result = await radarr_client.add_movie(
                     tmdb_id=movie["tmdb_id"],
@@ -180,11 +303,19 @@ class SyncService:
                 logger.error(f"Failed to add {movie['title']}: {e}")
                 failed_count += 1
 
+        # Mark scan as complete
+        self.update_scan_status(
+            status="complete",
+            current_movie=f"Sync complete: Added {added_count} movies"
+        )
+
         return {
             "added_count": added_count,
             "failed_count": failed_count,
             "remaining_today": remaining - added_count,
             "total_missing": len(missing_movies),
             "added_movies": added_movies,
-            "pending_movies": unsynced_missing[remaining:] if remaining < len(unsynced_missing) else []
+            "pending_movies": unsynced_missing[remaining:] if remaining < len(unsynced_missing) else [],
+            "cache_stats": cache_stats,
+            "scan_duration_seconds": (datetime.now() - self._scan_status["start_time"]).total_seconds() if self._scan_status["start_time"] else 0
         }

@@ -112,6 +112,96 @@
         </div>
     </div>
 
+    <!-- Cache Settings (NEW) -->
+    <div class="card rounded-xl overflow-hidden mb-6">
+        <div class="card-header">
+            <svg class="card-header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
+            </svg>
+            <div>
+                <h2 class="card-header-title">Cache Settings</h2>
+                <p class="card-header-subtitle">Control TMDB API caching for better performance</p>
+            </div>
+            <div class="ml-auto">
+                <button onclick="clearCache()" class="btn-sm btn-danger">
+                    🗑 Clear Cache
+                </button>
+            </div>
+        </div>
+        <div class="p-4 space-y-4">
+            <!-- Cache Statistics -->
+            <div id="cache-stats" class="text-sm p-3 rounded" style="background: var(--info-bg); border: 1px solid rgba(59, 130, 246, 0.3);">
+                <div class="font-semibold mb-2">📊 Cache Statistics</div>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div>Movies Cached:</div>
+                    <div id="cache-movies-count">-</div>
+                    <div>Collections Cached:</div>
+                    <div id="cache-collections-count">-</div>
+                    <div>Cache Hit Rate:</div>
+                    <div id="cache-hit-rate">-</div>
+                    <div>Session API Calls:</div>
+                    <div id="cache-api-calls">-</div>
+                    <div>Last Cleanup:</div>
+                    <div id="cache-last-cleanup">-</div>
+                </div>
+                <button onclick="refreshCacheStats()" class="btn-sm btn-outline mt-2 text-xs">🔄 Refresh Stats</button>
+            </div>
+
+            <!-- Cache Configuration -->
+            <div>
+                <label class="flex items-center gap-2 cursor-pointer mb-3">
+                    <input type="checkbox" id="enable-cache" checked class="accent-indigo-500" />
+                    <span class="text-sm">Enable TMDB Caching</span>
+                </label>
+                <p class="text-xs ml-6 mb-3" style="color: var(--text-secondary);">Cache TMDB responses to reduce API calls</p>
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold uppercase tracking-wide mb-2" style="color: var(--text-secondary);">
+                    Cache TTL (Days)
+                </label>
+                <input type="number" id="cache-ttl" min="1" max="365" value="30" class="w-32" />
+                <p class="text-xs mt-1" style="color: var(--text-secondary);">How long to keep cache entries (1-365 days)</p>
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold uppercase tracking-wide mb-2" style="color: var(--text-secondary);">
+                    Cache Cleanup Age (Days)
+                </label>
+                <input type="number" id="cache-cleanup" min="7" max="365" value="90" class="w-32" />
+                <p class="text-xs mt-1" style="color: var(--text-secondary);">Auto-remove cache older than this (7-365 days)</p>
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold uppercase tracking-wide mb-2" style="color: var(--text-secondary);">
+                    Batch Size
+                </label>
+                <input type="number" id="batch-size" min="5" max="100" value="20" class="w-32" />
+                <p class="text-xs mt-1" style="color: var(--text-secondary);">Movies to process per batch (5-100)</p>
+            </div>
+
+            <div>
+                <label class="flex items-center gap-2 cursor-pointer mb-3">
+                    <input type="checkbox" id="enable-rate-limiting" checked class="accent-indigo-500" />
+                    <span class="text-sm">Enable Rate Limiting</span>
+                </label>
+                <p class="text-xs ml-6" style="color: var(--text-secondary);">Respect TMDB API rate limits (50 requests/second)</p>
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold uppercase tracking-wide mb-2" style="color: var(--text-secondary);">
+                    Max Concurrent API Calls
+                </label>
+                <input type="number" id="max-concurrent" min="1" max="20" value="10" class="w-32" />
+                <p class="text-xs mt-1" style="color: var(--text-secondary);">Maximum parallel API requests (1-20)</p>
+            </div>
+
+            <button onclick="saveCacheSettings()" class="btn-raise w-full py-2 rounded-lg text-sm font-medium mt-2" style="background: var(--accent); color: white;">
+                💾 Save Cache Settings
+            </button>
+        </div>
+    </div>
+
     <!-- Sync Settings -->
     <div class="card rounded-xl overflow-hidden mb-6">
         <div class="card-header">
@@ -161,6 +251,7 @@
 
     window.addEventListener('DOMContentLoaded', () => {
         loadAllSettings();
+        loadCacheStats();
     });
 
     async function loadAllSettings() {
@@ -182,6 +273,18 @@
             const tmdbData = await tmdbRes.json();
             updateTMDBBadge(tmdbData.configured);
 
+            // Load Cache config
+            const cacheRes = await fetch('/api/tmdb/cache/config');
+            if (cacheRes.ok) {
+                const cacheData = await cacheRes.json();
+                document.getElementById('enable-cache').checked = cacheData.enable_cache !== false;
+                document.getElementById('cache-ttl').value = cacheData.cache_ttl_days || 30;
+                document.getElementById('cache-cleanup').value = cacheData.cache_cleanup_days || 90;
+                document.getElementById('batch-size').value = cacheData.batch_size || 20;
+                document.getElementById('enable-rate-limiting').checked = cacheData.enable_rate_limiting !== false;
+                document.getElementById('max-concurrent').value = cacheData.max_concurrent_api_calls || 10;
+            }
+
             // Load Sync settings
             const syncRes = await fetch('/api/sync/settings');
             const syncData = await syncRes.json();
@@ -196,6 +299,72 @@
 
         } catch (e) {
             console.error('Failed to load settings:', e);
+        }
+    }
+
+    async function loadCacheStats() {
+        try {
+            const res = await fetch('/api/tmdb/cache/stats');
+            if (res.ok) {
+                const stats = await res.json();
+                document.getElementById('cache-movies-count').textContent = stats.movies_cached || 0;
+                document.getElementById('cache-collections-count').textContent = stats.collections_cached || 0;
+                document.getElementById('cache-hit-rate').textContent = `${stats.cache_hit_rate_percent || 0}%`;
+                document.getElementById('cache-api-calls').textContent = stats.session_api_calls || 0;
+                document.getElementById('cache-last-cleanup').textContent = stats.last_cleanup ? new Date(stats.last_cleanup).toLocaleDateString() : 'Never';
+            }
+        } catch (e) {
+            console.error('Failed to load cache stats:', e);
+        }
+    }
+
+    function refreshCacheStats() {
+        loadCacheStats();
+        showToast('Cache stats refreshed', 'info');
+    }
+
+    async function clearCache() {
+        if (!confirm('Are you sure you want to clear the TMDB cache? This may slow down the next scan temporarily.')) {
+            return;
+        }
+        
+        try {
+            const res = await fetch('/api/tmdb/cache?full_clear=true', { method: 'DELETE' });
+            if (res.ok) {
+                showToast('Cache cleared successfully', 'success');
+                loadCacheStats();
+            } else {
+                showToast('Failed to clear cache', 'error');
+            }
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
+        }
+    }
+
+    async function saveCacheSettings() {
+        const cacheConfig = {
+            ttl_days: parseInt(document.getElementById('cache-ttl').value),
+            cleanup_days: parseInt(document.getElementById('cache-cleanup').value),
+            batch_size: parseInt(document.getElementById('batch-size').value),
+            max_concurrent: parseInt(document.getElementById('max-concurrent').value),
+            enable_cache: document.getElementById('enable-cache').checked,
+            enable_rate_limiting: document.getElementById('enable-rate-limiting').checked
+        };
+        
+        try {
+            const res = await fetch('/api/tmdb/cache/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(cacheConfig)
+            });
+            
+            if (res.ok) {
+                showToast('Cache settings saved', 'success');
+            } else {
+                showToast('Failed to save cache settings', 'error');
+            }
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
         }
     }
 
@@ -255,7 +424,6 @@
             return;
         }
 
-        // First test connection
         showStatus('radarr-status', 'Testing connection...', 'info');
         
         try {
@@ -273,8 +441,6 @@
             
             showStatus('radarr-status', '✓ Connected! Loading folders...', 'info');
             
-            // Create a temporary client to get folders (we need to save config first temporarily)
-            // For now, we'll use a different approach - save temporarily
             const tempSaveRes = await fetch('/api/radarr/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -391,6 +557,9 @@
             }
         }
         
+        // Save cache settings
+        await saveCacheSettings();
+        
         // Save sync settings
         try {
             const syncRes = await fetch('/api/sync/settings', {
@@ -421,7 +590,6 @@
         el.className = `connection-status ${type}`;
         el.innerHTML = message;
         
-        // Clear error styling after 5 seconds for success messages
         if (type === 'success') {
             setTimeout(() => {
                 if (el.innerHTML === message) {
