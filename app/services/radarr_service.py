@@ -85,6 +85,20 @@ class RadarrClient:
         """Fetch available root folders from Radarr."""
         return await self._request("GET", "rootfolder")
 
+    async def get_movies_with_collections(self) -> List[Dict[str, Any]]:
+        """Fetch movies and check if Radarr provides collectionTmdbId."""
+        movies = await self.get_movies()
+    
+        # Log sample to see what data Radarr returns
+        if movies:
+            sample = movies[0]
+            logger.info(f"Sample movie keys: {sample.keys()}")
+            if 'collectionTmdbId' in sample:
+                logger.info("Radarr provides collectionTmdbId natively!")
+            else:
+                logger.info("Radarr does not provide collectionTmdbId, using TMDB API")
+        return movies
+    
     async def add_movie(self, tmdb_id: int, title: str, root_folder_path: str, quality_profile_id: Optional[int] = None) -> Dict[str, Any]:
         """Add a movie to Radarr using TMDB ID."""
         payload = {

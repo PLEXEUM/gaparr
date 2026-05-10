@@ -93,3 +93,26 @@ async def get_root_folders(request: Request) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Failed to fetch root folders: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/check-collections")
+async def check_collections(request: Request) -> Dict[str, Any]:
+    """Check if Radarr provides collection data natively."""
+    url = settings.radarr_url
+    api_key = settings.radarr_api_key
+    
+    if not url or not api_key:
+        raise HTTPException(status_code=400, detail="Radarr not configured")
+    
+    try:
+        client = RadarrClient(url, api_key)
+        result = await client.get_movies_with_collections()
+        # Return summary instead of all movies
+        sample = result[0] if result else {}
+        return {
+            "total_movies": len(result),
+            "sample_keys": list(sample.keys()) if sample else [],
+            "has_collectionTmdbId": 'collectionTmdbId' in sample if sample else False
+        }
+    except Exception as e:
+        logger.error(f"Failed to check collections: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
