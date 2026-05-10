@@ -41,7 +41,7 @@ def run_scheduled_sync():
     try:
         async def _sync():
             radarr_client = RadarrClient(settings.radarr_url, settings.radarr_api_key)
-            tmdb_service = TMDBService(settings.tmdb_api_key)
+            tmdb_service = TMDBService(settings.tmdb_api_key, settings.data_dir)
             sync_service = SyncService(settings.data_dir)
             
             result = await sync_service.sync_missing_movies(

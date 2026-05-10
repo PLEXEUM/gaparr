@@ -1,6 +1,8 @@
 """TMDB API service for collection and movie data."""
 
 import httpx
+import json
+from pathlib import Path
 from typing import Optional, List, Dict, Any, Set, Tuple
 from datetime import date
 import logging
@@ -11,13 +13,49 @@ logger = logging.getLogger(__name__)
 class TMDBService:
     """The Movie Database API client for collection discovery."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, data_dir: str = "data"):
         self.api_key = api_key
         self.base_url = "https://api.themoviedb.org/3"
         self.image_base_url = "https://image.tmdb.org/t/p/w500"
+        self.data_dir = Path(data_dir)
+        self.cache_file = self.data_dir / "tmdb_cache.json"
+        
         # In-memory caches
         self._collection_cache: Dict[int, Dict[str, Any]] = {}
         self._movie_collection_cache: Dict[int, Optional[int]] = {}
+        
+        # Load cached data from disk
+        self._load_cache()
+
+    def _load_cache(self) -> None:
+        """Load cached TMDB data from JSON file."""
+        if self.cache_file.exists():
+            try:
+                with open(self.cache_file, "r") as f:
+                    cache = json.load(f)
+                    # Convert string keys back to integers
+                    self._movie_collection_cache = {
+                        int(k): v for k, v in cache.get("movie_collection_cache", {}).items()
+                    }
+                    self._collection_cache = {
+                        int(k): v for k, v in cache.get("collection_cache", {}).items()
+                    }
+                    logger.info(f"Loaded TMDB cache: {len(self._movie_collection_cache)} movies, {len(self._collection_cache)} collections")
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"Failed to load TMDB cache: {e}")
+
+    def _save_cache(self) -> None:
+        """Save cached TMDB data to JSON file."""
+        try:
+            cache_data = {
+                "movie_collection_cache": self._movie_collection_cache,
+                "collection_cache": self._collection_cache
+            }
+            with open(self.cache_file, "w") as f:
+                json.dump(cache_data, f, indent=2)
+            logger.debug(f"Saved TMDB cache: {len(self._movie_collection_cache)} movies, {len(self._collection_cache)} collections")
+        except IOError as e:
+            logger.warning(f"Failed to save TMDB cache: {e}")
 
     async def _request(self, endpoint: str, params: Optional[Dict] = None) -> Dict[str, Any]:
         """Make a request to TMDB API."""
@@ -52,10 +90,12 @@ class TMDBService:
             collection = data.get("belongs_to_collection")
             collection_id = collection["id"] if collection else None
             self._movie_collection_cache[tmdb_id] = collection_id
+            self._save_cache()  # Save after each new lookup
             return collection_id
         except Exception as e:
             logger.warning(f"Failed to get collection for movie {tmdb_id}: {e}")
             self._movie_collection_cache[tmdb_id] = None
+            self._save_cache()
             return None
 
     async def get_collection(self, collection_id: int) -> Optional[Dict[str, Any]]:
@@ -66,6 +106,7 @@ class TMDBService:
         try:
             data = await self._request(f"collection/{collection_id}")
             self._collection_cache[collection_id] = data
+            self._save_cache()  # Save after each new lookup
             return data
         except Exception as e:
             logger.warning(f"Failed to get collection {collection_id}: {e}")
@@ -91,24 +132,21 @@ class TMDBService:
             ignore_movies = []
 
         seen_collections: Set[int] = set()
-        missing_movies: Dict[int, Dict] = {}  # Deduplicate by TMDB ID
+        missing_movies: Dict[int, Dict] = {}
 
         logger.info(f"Finding collection gaps for {len(owned_tmdb_ids)} owned movies")
 
         for tmdb_id in owned_tmdb_ids:
-            # Get collection ID for this movie
             collection_id = await self.get_movie_collection_id(tmdb_id)
             if not collection_id or collection_id in seen_collections:
                 continue
 
-            # Skip ignored collections
             if collection_id in ignore_collections:
                 logger.debug(f"Skipping ignored collection ID: {collection_id}")
                 continue
 
             seen_collections.add(collection_id)
 
-            # Get full collection details
             collection = await self.get_collection(collection_id)
             if not collection:
                 continue
@@ -121,15 +159,12 @@ class TMDBService:
                 if not part_id:
                     continue
 
-                # Skip if already owned or already queued to add
                 if part_id in owned_tmdb_ids:
                     continue
 
-                # Skip ignored movies
                 if part_id in ignore_movies:
                     continue
 
-                # Skip future releases if setting enabled
                 if hide_future:
                     release_date_str = part.get("release_date", "")
                     if release_date_str:
@@ -139,9 +174,8 @@ class TMDBService:
                                 logger.debug(f"Skipping future release: {part.get('title')} ({release_date})")
                                 continue
                         except ValueError:
-                            pass  # Invalid date format, assume released
+                            pass
 
-                # Add to missing movies dict (deduplicate)
                 if part_id not in missing_movies:
                     poster = part.get("poster_path")
                     missing_movies[part_id] = {
@@ -155,7 +189,6 @@ class TMDBService:
                         "overview": part.get("overview", "")
                     }
 
-        # Convert to sorted list
         result = list(missing_movies.values())
         result.sort(key=lambda x: (x["collection_name"], x["year"]))
         logger.info(f"Found {len(result)} missing movies from {len(seen_collections)} collections")
