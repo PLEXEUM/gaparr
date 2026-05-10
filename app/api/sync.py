@@ -33,10 +33,9 @@ class SyncSettingsInput(BaseModel):
     sync_time: str
     hide_future: bool
 
-
 @router.get("/status")
 async def get_sync_status(request: Request) -> Dict[str, Any]:
-    """Get current sync status including daily quota and missing movies."""
+    """Get current sync status WITHOUT performing a scan."""
     # Check if configured
     if not settings.is_fully_configured:
         return {
@@ -45,53 +44,33 @@ async def get_sync_status(request: Request) -> Dict[str, Any]:
             "first_run": settings.first_run
         }
     
-    # Initialize services
+    # Only return configuration and daily limit status. NO SCANNING.
     sync_service = SyncService()
-    radarr_client = RadarrClient(settings.radarr_url, settings.radarr_api_key)
-    tmdb_service = TMDBService(settings.tmdb_api_key)
+    remaining_today = sync_service.get_remaining_today(settings.daily_limit)
+
+    return {
+        "configured": True,
+        "daily_limit": settings.daily_limit,
+        "synced_today": sync_service._state.get("synced_today", 0),
+        "remaining_today": remaining_today,
+        "total_missing": 0,
+        "unsynced_missing": 0,
+        "missing_movies": [],
+        "hide_future": settings.hide_future_releases,
+        "root_folder": settings.root_folder_path,
+        "last_sync_date": sync_service._state.get("last_sync_date"),
+        "first_run": False
+    }
+
+@router.post("/scan")
+async def perform_scan(data: SyncTriggerInput, request: Request, background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    """Performs the actual scan (heavy). Called by 'Sync Now' and 'Dry Run' buttons."""
+    # Check if configured
+    if not settings.is_fully_configured:
+        raise HTTPException(status_code=400, detail="Radarr or TMDB not configured")
     
-    try:
-        # Get Radarr movies
-        radarr_movies = await radarr_client.get_movies()
-        owned_tmdb_ids = {m.get("tmdbId") for m in radarr_movies if m.get("tmdbId")}
-        
-        # Find missing movies
-        missing_movies = await tmdb_service.find_collection_gaps(
-            owned_tmdb_ids=owned_tmdb_ids,
-            hide_future=settings.hide_future_releases,
-            ignore_collections=sync_service.get_ignored_collections(),
-            ignore_movies=sync_service.get_ignored_movies()
-        )
-        
-        # Filter already synced
-        unsynced_missing = [
-            m for m in missing_movies
-            if not sync_service.is_synced(m["tmdb_id"])
-        ]
-        
-        remaining_today = sync_service.get_remaining_today(settings.daily_limit)
-        
-        return {
-            "configured": True,
-            "daily_limit": settings.daily_limit,
-            "synced_today": sync_service._state.get("synced_today", 0),
-            "remaining_today": remaining_today,
-            "total_missing": len(missing_movies),
-            "unsynced_missing": len(unsynced_missing),
-            "missing_movies": unsynced_missing[:20],  # First 20 for display
-            "hide_future": settings.hide_future_releases,
-            "root_folder": settings.root_folder_path,
-            "last_sync_date": sync_service._state.get("last_sync_date"),
-            "first_run": False
-        }
-    except Exception as e:
-        logger.error(f"Failed to get sync status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/trigger")
-async def trigger_sync(data: SyncTriggerInput, request: Request, background_tasks: BackgroundTasks) -> Dict[str, Any]:
-    """Trigger a manual sync (adds missing movies respecting daily limit)."""
+    # ... KEEP ALL THE EXISTING CODE FROM THE OLD /trigger ENDPOINT ...
+    # (The dry run logic, the background task for real sync, everything stays the same)
     # Check if configured
     if not settings.is_fully_configured:
         raise HTTPException(status_code=400, detail="Radarr or TMDB not configured")

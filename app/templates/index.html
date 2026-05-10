@@ -122,10 +122,20 @@
         try {
             const res = await fetch('/api/sync/status');
             const data = await res.json();
-        
+    
             if (data.configured) {
-                // Show that system is ready but no scan done yet
                 document.getElementById('stat-limit').textContent = data.daily_limit || 5;
+                // Show placeholder message - no scan performed
+                document.getElementById('missing-table-body').innerHTML = `
+                    <tr>
+                        <td colspan="5" class="text-center py-8" style="color: var(--text-secondary);">
+                            👆 Click "Sync Now" or "Dry Run" to scan for missing movies
+                        </td>
+                    </tr>
+                `;
+                document.getElementById('stat-missing').textContent = '?';
+                document.getElementById('stat-synced-today').textContent = '0';
+                document.getElementById('stat-remaining').textContent = '?';
             } else {
                 document.getElementById('missing-table-body').innerHTML = `
                     <tr>
@@ -137,46 +147,6 @@
             }
         } catch (e) {
             console.error('Failed to check config:', e);
-        }
-    }
-
-    async function loadStatus() {
-        try {
-            const res = await fetch('/api/sync/status');
-            const data = await res.json();
-            currentStatus = data;
-
-            if (!data.configured) {
-                document.getElementById('stat-missing').textContent = '!';
-                document.getElementById('stat-synced-today').textContent = 'N/A';
-                document.getElementById('stat-remaining').textContent = 'N/A';
-                document.getElementById('stat-limit').textContent = 'N/A';
-                document.getElementById('missing-table-body').innerHTML = `
-                    <tr>
-                        <td colspan="5" class="text-center py-8" style="color: var(--warning);">
-                            ⚠️ ${data.message || 'Radarr or TMDB not configured. Please go to Settings.'}
-                        </td>
-                    </tr>
-                `;
-                return;
-            }
-
-            document.getElementById('stat-missing').textContent = data.total_missing || 0;
-            document.getElementById('stat-synced-today').textContent = data.synced_today || 0;
-            document.getElementById('stat-remaining').textContent = data.remaining_today || 0;
-            document.getElementById('stat-limit').textContent = data.daily_limit || 5;
-
-            if (data.last_sync_date) {
-                document.getElementById('last-sync').textContent = data.last_sync_date;
-            }
-
-            allMissingMovies = data.missing_movies || [];
-            displayedMovieCount = 20;
-            renderMovieTable();
-
-        } catch (e) {
-            console.error('Failed to load status:', e);
-            showToast('Failed to load status', 'error');
         }
     }
 
@@ -281,7 +251,7 @@
         }, 1000);
     
         try {
-            const res = await fetch('/api/sync/trigger', {
+            const res = await fetch('/api/sync/scan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ dry_run: dryRun })
@@ -293,12 +263,12 @@
                 if (dryRun && data.dry_run) {
                     scanStatus.textContent = 'Dry run complete!';
                     showToast(`Dry run: Would add ${data.would_add} movies today`, 'info');
-                    setTimeout(() => loadStatus(), 2000);
+                    setTimeout(() => checkConfigOnly(), 2000);
                 } else if (!dryRun) {
                     scanStatus.textContent = 'Sync complete!';
                     showToast('Sync started in background', 'success');
-                    setTimeout(() => loadStatus(), 3000);
-                    setTimeout(() => loadStatus(), 10000);
+                    setTimeout(() => checkConfigOnly(), 3000);
+                    setTimeout(() => checkConfigOnly(), 10000);
                 }
             } else {
                 scanStatus.textContent = 'Scan failed';
