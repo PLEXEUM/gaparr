@@ -10,6 +10,7 @@ services:
     volumes:
       # Persistent data storage (sync state, ignores)
       - ./data:/app/data
+      - ./logs:/app/logs
     environment:
       - PORT=7117
       - HOST=0.0.0.0

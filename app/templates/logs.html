@@ -99,60 +99,76 @@
 
     async function loadLogs() {
         try {
-            const res = await fetch('/api/logs');
+            const res = await fetch('/api/logs?lines=200');
             const data = await res.json();
-            // Since we don't have a logs API yet, we'll simulate with a message
-            // In production, you'd implement a proper logs endpoint
-            document.getElementById('log-content').innerHTML = getSimulatedLogs();
-            document.getElementById('log-meta').textContent = 'Showing simulated logs. In production, logs would come from /api/logs';
-            allLines = [];
+            
+            if (data.lines && data.lines.length > 0) {
+                const logContent = document.getElementById('log-content');
+                allLines = data.lines;
+                
+                logContent.innerHTML = data.lines.map(line => {
+                    let color = 'var(--text-primary)';
+                    if (line.includes('ERROR')) color = '#f87171';
+                    else if (line.includes('WARNING')) color = '#fbbf24';
+                    else if (line.includes('INFO')) color = '#86efac';
+                    else if (line.includes('DEBUG')) color = '#94a3b8';
+                    
+                    return `<div style="color: ${color}; padding: 1px 0; font-family: monospace; font-size: 12px; white-space: pre-wrap; border-bottom: 1px solid var(--border-color);">${escapeHtml(line)}</div>`;
+                }).join('');
+                
+                document.getElementById('log-meta').textContent = `Showing ${data.showing} of ${data.total_lines} lines from ${data.log_file || 'gaparr.log'}`;
+                
+                // Auto-scroll to bottom
+                if (document.getElementById('auto-scroll').checked) {
+                    const viewer = document.getElementById('log-viewer');
+                    viewer.scrollTop = viewer.scrollHeight;
+                }
+            } else {
+                document.getElementById('log-content').innerHTML = '<div style="color: var(--text-secondary); padding: 1rem;">No log entries found. Logs will appear here once Gaparr starts.</div>';
+                document.getElementById('log-meta').textContent = 'No logs available';
+            }
         } catch (e) {
-            document.getElementById('log-content').innerHTML = 'Failed to load logs: ' + e.message;
+            console.error('Failed to load logs:', e);
+            document.getElementById('log-content').innerHTML = `<div style="color: var(--danger); padding: 1rem;">Failed to load logs: ${e.message}</div>`;
         }
-    }
-
-    function getSimulatedLogs() {
-        const now = new Date();
-        const timestamp = now.toISOString().slice(0, 19).replace('T', ' ');
-        
-        return `
-            <div style="color: #86efac;">${timestamp} [INFO] Gaparr started successfully on port 7117</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Scheduled daily sync at 02:00</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Data directory: data</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Radarr configuration loaded</div>
-            <div style="color: #86efac;">${timestamp} [INFO] TMDB configuration loaded</div>
-            <div style="color: #fbbf24;">${timestamp} [WARNING] Daily limit reached, no more movies today</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Fetching 1247 movies from Radarr...</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Found 1247 movies in Radarr</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Finding collection gaps from TMDB...</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Found 23 missing movies from 8 collections</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Adding to Radarr: Aliens (1986)</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Successfully added: Aliens</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Adding to Radarr: Alien³ (1992)</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Successfully added: Alien³</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Adding to Radarr: Alien: Resurrection (1997)</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Successfully added: Alien: Resurrection</div>
-            <div style="color: #86efac;">${timestamp} [INFO] Sync complete: added 3 movies</div>
-        `;
     }
 
     function filterLogs() {
         const filter = document.getElementById('log-filter').value;
-        const logContent = document.getElementById('log-content');
-        const lines = logContent.innerHTML.split('</div>');
         
         if (filter === 'ALL') {
-            // Just refresh
-            loadLogs();
+            // Re-display all lines
+            const logContent = document.getElementById('log-content');
+            if (allLines.length > 0) {
+                logContent.innerHTML = allLines.map(line => {
+                    let color = 'var(--text-primary)';
+                    if (line.includes('ERROR')) color = '#f87171';
+                    else if (line.includes('WARNING')) color = '#fbbf24';
+                    else if (line.includes('INFO')) color = '#86efac';
+                    else if (line.includes('DEBUG')) color = '#94a3b8';
+                    
+                    return `<div style="color: ${color}; padding: 1px 0; font-family: monospace; font-size: 12px; white-space: pre-wrap; border-bottom: 1px solid var(--border-color);">${escapeHtml(line)}</div>`;
+                }).join('');
+            }
             return;
         }
         
-        // Simple filter for demo
-        const filtered = lines.filter(line => line.includes(`[${filter}]`));
+        // Filter lines
+        const filtered = allLines.filter(line => line.includes(`[${filter}]`));
+        const logContent = document.getElementById('log-content');
+        
         if (filtered.length === 0) {
-            logContent.innerHTML = '<div style="color: var(--text-secondary);">No matching log entries found.</div>';
+            logContent.innerHTML = `<div style="color: var(--text-secondary); padding: 1rem;">No ${filter} log entries found.</div>`;
         } else {
-            logContent.innerHTML = filtered.join('</div>');
+            logContent.innerHTML = filtered.map(line => {
+                let color = 'var(--text-primary)';
+                if (line.includes('ERROR')) color = '#f87171';
+                else if (line.includes('WARNING')) color = '#fbbf24';
+                else if (line.includes('INFO')) color = '#86efac';
+                else if (line.includes('DEBUG')) color = '#94a3b8';
+                
+                return `<div style="color: ${color}; padding: 1px 0; font-family: monospace; font-size: 12px; white-space: pre-wrap; border-bottom: 1px solid var(--border-color);">${escapeHtml(line)}</div>`;
+            }).join('');
         }
     }
 
@@ -183,12 +199,17 @@
     }
 
     function downloadLogs() {
-        const logContent = document.getElementById('log-content').innerText;
-        const blob = new Blob([logContent], { type: 'text/plain' });
+        if (allLines.length === 0) {
+            showToast('No logs to download', 'warning');
+            return;
+        }
+        
+        const logText = allLines.join('\n');
+        const blob = new Blob([logText], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `gaparr_logs_${new Date().toISOString().slice(0, 19)}.txt`;
+        a.download = `gaparr_logs_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
         a.click();
         URL.revokeObjectURL(url);
         showToast('Logs downloaded', 'success');
@@ -202,11 +223,30 @@
         document.getElementById('clear-dialog').classList.add('hidden');
     }
 
-    function confirmClearLogs() {
-        // In a real implementation, you'd call an API endpoint
-        document.getElementById('log-content').innerHTML = '<div style="color: var(--text-secondary);">Logs cleared. New logs will appear as activity occurs.</div>';
+    async function confirmClearLogs() {
         closeClearDialog();
-        showToast('Logs cleared from display', 'info');
+        
+        try {
+            const res = await fetch('/api/logs', { method: 'DELETE' });
+            if (res.ok) {
+                showToast('Logs cleared', 'success');
+                loadLogs();
+            } else {
+                showToast('Failed to clear logs', 'error');
+            }
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
+        }
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
     }
 </script>
 {% endblock %}

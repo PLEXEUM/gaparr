@@ -20,6 +20,9 @@ COPY . .
 # Create data directory for persistent storage
 RUN mkdir -p /app/data
 
+# Create logs directory for log files
+RUN mkdir -p /app/logs
+
 # Expose port
 EXPOSE 7117
 

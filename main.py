@@ -15,6 +15,7 @@ from app.settings import settings
 from app.services.radarr_service import RadarrClient
 from app.services.tmdb_service import TMDBService
 from app.services.sync_service import SyncService
+from app.api import logs
 
 # Import API routers
 from app.api import radarr, tmdb, sync
@@ -138,6 +139,7 @@ templates = Jinja2Templates(directory="app/templates")
 app.include_router(radarr.router)
 app.include_router(tmdb.router)
 app.include_router(sync.router)
+app.include_router(logs.router)
 
 
 # Frontend routes
