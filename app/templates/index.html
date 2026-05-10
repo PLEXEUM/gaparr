@@ -33,8 +33,8 @@
                 <button onclick="triggerSync(true)" id="dryrun-btn" class="btn-raise px-4 py-2 rounded-lg text-sm border" style="border-color: var(--border-color); color: var(--text-secondary);">
                     🔍 Dry Run (Preview)
                 </button>
-                <button onclick="loadStatus()" class="btn-raise px-4 py-2 rounded-lg text-sm border" style="border-color: var(--border-color); color: var(--text-secondary);">
-                    ↻ Refresh
+                <button onclick="window.location.reload()" class="btn-raise px-4 py-2 rounded-lg text-sm border" style="border-color: var(--border-color); color: var(--text-secondary);">
+                    ↻ Refresh Page
                 </button>
             </div>
             <div class="text-sm" style="color: var(--text-secondary);">
@@ -85,10 +85,46 @@
     let currentStatus = null;
 
     window.addEventListener('DOMContentLoaded', () => {
-        loadStatus();
-        // Auto-refresh every 30 seconds
-        setInterval(loadStatus, 30000);
+        // Show placeholder message instead of scanning
+        document.getElementById('stat-missing').textContent = '?';
+        document.getElementById('stat-synced-today').textContent = '0';
+        document.getElementById('stat-remaining').textContent = '?';
+        document.getElementById('stat-limit').textContent = '?';
+        document.getElementById('missing-table-body').innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center py-8" style="color: var(--text-secondary);">
+                    👆 Click "Sync Now" or "Dry Run" to scan for missing movies
+                </td>
+            </tr>
+        `;
+    
+        // Still check config status (lightweight, no scan)
+        checkConfigOnly();
+    
+        setInterval(checkConfigOnly, 30000);
     });
+
+    async function checkConfigOnly() {
+        try {
+            const res = await fetch('/api/sync/status');
+            const data = await res.json();
+        
+            if (data.configured) {
+                // Show that system is ready but no scan done yet
+                document.getElementById('stat-limit').textContent = data.daily_limit || 5;
+            } else {
+                document.getElementById('missing-table-body').innerHTML = `
+                    <tr>
+                        <td colspan="5" class="text-center py-8" style="color: var(--warning);">
+                            ⚠️ ${data.message || 'Radarr or TMDB not configured. Please go to Settings.'}
+                        </td>
+                    </tr>
+                `;
+            }
+        } catch (e) {
+            console.error('Failed to check config:', e);
+        }
+    }
 
     async function loadStatus() {
         try {
