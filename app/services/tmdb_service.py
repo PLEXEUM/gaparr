@@ -107,13 +107,13 @@ class TMDBService:
         try:
             data = await self._request(f"collection/{collection_id}")
             self._collection_cache[collection_id] = data
-            self._save_cache()  # Save after each new lookup
+            self._save_cache()
             return data
         except Exception as e:
             logger.warning(f"Failed to get collection {collection_id}: {e}")
             return None
 
-        async def find_collection_gaps(
+    async def find_collection_gaps(
         self,
         owned_tmdb_ids: Set[int],
         hide_future: bool = True,
