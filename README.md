@@ -1,193 +1,151 @@
 # 🎬 Gaparr
 
-**Automatically add missing collection movies to Radarr.**
-
-Gaparr scans your Radarr library, finds movies missing from TMDB collections (like sequels or franchise entries), and adds them to Radarr - respecting your daily limits and filtering future releases.
+**Automatically find and add missing collection movies to Radarr.**
 
 ---
 
-## ✨ Features
+## How It Works
 
-- **Collection Discovery** - Finds missing movies from TMDB collections
-- **Daily Limits** - Control how many movies get added per day
-- **Future Release Filter** - Skip movies that haven't been released yet
-- **Ignore Lists** - Permanently skip specific movies or entire collections
-- **Dry Run Mode** - Preview what would be added without making changes
-- **Docker Ready** - Easy deployment with Docker Compose
-- **Dark/Light Theme** - Matches Resizarr's visual design
+1. Scans your Radarr library for all movies
+2. Finds which TMDB collections those movies belong to
+3. Fetches complete collection details from TMDB
+4. Identifies movies you're missing
+5. Automatically adds up to your daily limit to Radarr
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### Docker (Recommended)
+### 1. Clone or download Gaparr
 
 ```bash
-# Clone the repository
 git clone https://github.com/yourusername/gaparr.git
 cd gaparr
+```
 
-# Copy and edit environment file
-cp .env.example .env
-# Edit .env with your Radarr URL, API key, and TMDB API key
+### 2. Create your config file
 
-# Start Gaparr
+```bash
+copy config_example.json config.json
+```
+
+Edit `config.json` with your settings:
+
+```json
+{
+  "radarr_url": "http://192.168.0.77:7878",
+  "radarr_api_key": "YOUR_RADARR_API_KEY",
+  "tmdb_api_key": "YOUR_TMDB_API_KEY",
+  "root_folder": "/movies",
+  "daily_limit": 5,
+  "auto_add": true,
+  "hide_future": true
+}
+```
+
+### 3. Start the container
+
+```bash
 docker-compose up -d
 ```
 
-Open `http://localhost:7117` in your browser.
-
-### Local Development
+### 4. Check the logs
 
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Copy environment file
-cp .env.example .env
-# Edit .env with your configuration
-
-# Run the app
-python main.py
+docker logs gaparr
 ```
 
----
-
-## ⚙️ Configuration
-
-Create a `.env` file with these settings:
-
-```env
-# Required
-RADARR_URL=http://localhost:7878
-RADARR_API_KEY=your_radarr_api_key
-TMDB_API_KEY=your_tmdb_api_key
-
-# Optional
-DAILY_LIMIT=5                    # Movies to add per day
-SYNC_TIME=02:00                  # Daily sync time (24h)
-HIDE_FUTURE_RELEASES=true        # Skip unreleased movies
-LOG_LEVEL=INFO                   # DEBUG, INFO, WARNING, ERROR
-PORT=7117                        # Web UI port
-```
-
-### Getting a TMDB API Key
-
-1. Sign up at [themoviedb.org](https://www.themoviedb.org)
-2. Go to Settings → API
-3. Request an API key (Developer)
-4. Copy your API key to `.env`
-
-### Getting Radarr API Key
-
-1. Open Radarr → Settings → General
-2. Copy the API Key under "Security"
+Or view the log file: `logs/gaparr.log`
 
 ---
 
-## 📊 Usage
+## Configuration Options
 
-### Dashboard
-
-- View missing movies found in your collections
-- See daily sync progress (X of Y movies added today)
-- Run manual sync or dry run preview
-
-### Settings
-
-- Configure Radarr connection (URL, API key, root folder)
-- Configure TMDB API key
-- Set daily limit and sync schedule
-
-### Logs
-
-- View application activity
-- Download logs for debugging
+| Setting | Description |
+|---------|-------------|
+| `radarr_url` | Your Radarr URL (e.g., http://192.168.0.77:7878) |
+| `radarr_api_key` | From Radarr Settings → General |
+| `tmdb_api_key` | From themoviedb.org (create free account) |
+| `root_folder` | Where Radarr stores movies |
+| `daily_limit` | Max movies to add per day (1-50) |
+| `auto_add` | true = automatic, false = dry run |
+| `hide_future` | true = skip unreleased movies |
 
 ---
 
-## 🐳 Docker Commands
+## Manual Run
+
+Run the script immediately (not waiting for schedule):
 
 ```bash
-# Build and start
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
-
-# Restart
-docker-compose restart
+docker exec -it gaparr python sync.py
 ```
 
 ---
 
-## 📁 Project Structure
+## View Results
 
+- **Radarr UI** – New movies appear in your library
+- **Docker logs** – `docker logs gaparr`
+- **Log file** – `logs/gaparr.log`
+- **Last scan results** – `logs/last_scan.json`
+
+---
+
+## Schedule
+
+The script runs automatically at 2:00 AM daily. To change the schedule, edit the command in `docker-compose.yml`:
+
+```yaml
+command: sh -c "echo '0 2 * * * python /app/sync.py' | crontab - && crond -f"
 ```
-gaparr/
-├── app/
-│   ├── api/              # FastAPI routes
-│   ├── services/         # Radarr, TMDB, Sync services
-│   ├── templates/        # HTML templates
-│   └── static/           # Static assets
-├── data/                 # Persistent state (ignore lists, sync counts)
-├── main.py              # Application entry point
-├── requirements.txt     # Python dependencies
-├── Dockerfile           # Docker build instructions
-├── docker-compose.yml   # Docker Compose configuration
-└── .env.example         # Environment variables template
-```
+
+Or use your preferred scheduling method.
 
 ---
 
-## 🔧 How It Works
+## Requirements
 
-1. **Fetch Radarr Library** - Gets all movies currently in Radarr
-2. **Find Collections** - For each movie, finds its TMDB collection
-3. **Identify Gaps** - Compares collection parts against owned movies
-4. **Apply Filters** - Skips ignored items, future releases, and respects daily limit
-5. **Add to Radarr** - Adds missing movies automatically
+- Docker Desktop (Windows/Mac) or Docker Engine (Linux)
+- Radarr running and accessible
+- TMDB API key (free)
 
 ---
 
-## ❓ FAQ
+## Troubleshooting
 
-**Why use Radarr instead of Plex as source of truth?**
+**"No quality profiles found"**
+- Create at least one quality profile in Radarr (Settings → Quality Profiles)
 
-Radarr knows about movies you've added (even if not yet downloaded). Plex only knows what's actually on disk. Using Radarr prevents re-adding movies that are already in your queue.
+**"Config file not found"**
+- Copy `config_example.json` to `config.json` and edit it
 
-**How does the daily limit work?**
-
-Gaparr tracks how many movies it has added each day in `data/sync_state.json`. Once the limit is reached, no more movies will be added until the next day.
-
-**Can I preview changes before syncing?**
-
-Yes! Use the "Dry Run" button on the dashboard to see what would be added without actually adding anything.
-
-**How do I ignore a movie or collection?**
-
-Use the ignore endpoints via API (coming soon to UI). For now, you can manually edit `data/sync_state.json`.
+**Connection failed to Radarr**
+- Check `radarr_url` is correct and Radarr is running
 
 ---
 
-## 📝 License
+## Files
 
-MIT License - see LICENSE file for details.
+| File | Purpose |
+|------|---------|
+| `sync.py` | Main script |
+| `config.json` | Your settings (you create this) |
+| `config_example.json` | Template for config |
+| `logs/gaparr.log` | Script output |
+| `logs/last_scan.json` | Last scan results |
 
 ---
 
-## 🙏 Credits
+## License
 
-- Built with [FastAPI](https://fastapi.tiangolo.com/)
-- Radarr integration adapted from Resizarr
-- Collection logic inspired by GAPS-2
+MIT
+
+---
+
+## Support
+
+Open an issue on GitHub
 
 ---
 

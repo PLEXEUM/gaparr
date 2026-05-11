@@ -1,42 +1,30 @@
-# Python
+# Config file with real API keys (user creates locally)
+config.json
+
+# Log files
+logs/
+*.log
+
+# Python cache
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
 venv/
 env/
-ENV/
-.venv
-pip-log.txt
-pip-delete-this-directory.txt
-.pytest_cache/
-.coverage
-*.cover
-
-# Environment files
 .env
-.env.local
-.env.*.local
 
-# IDE
+# IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
-.DS_Store
 
-# Project specific
-data/*.json
-!data/.gitkeep
-logs/
-*.log
+# OS files
+.DS_Store
+Thumbs.db
 
 # Docker
 *.pid
-docker-compose.override.yml
-
-# OS
-Thumbs.db
-desktop.ini

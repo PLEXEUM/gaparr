@@ -2,29 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first (for better layer caching)
+# Install dependencies
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
-# This copies main.py AND the entire app/ directory into /app/
-COPY . .
+# Copy script
+COPY sync.py .
 
-# Create data directory for persistent storage
-RUN mkdir -p /app/data
-
-# Create logs directory for log files
+# Create logs directory
 RUN mkdir -p /app/logs
 
-# Expose port
-EXPOSE 7117
-
-# Run main.py
-CMD ["python", "main.py"]
+# Run script (will be overridden by docker-compose if needed)
+CMD ["python", "sync.py"]

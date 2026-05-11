@@ -1,9 +1,0 @@
-__pycache__
-*.pyc
-.venv
-.env
-.git
-.github
-README.md
-.gitignore
-docker-compose.yml

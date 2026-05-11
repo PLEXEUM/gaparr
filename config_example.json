@@ -1,0 +1,9 @@
+{
+  "radarr_url": "http://192.168.0.77:7878",
+  "radarr_api_key": "YOUR_RADARR_API_KEY_HERE",
+  "tmdb_api_key": "YOUR_TMDB_API_KEY_HERE",
+  "root_folder": "/movies",
+  "daily_limit": 5,
+  "auto_add": true,
+  "hide_future": true
+}
