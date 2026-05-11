@@ -11,12 +11,8 @@ COPY sync.py /app/sync.py
 
 RUN mkdir -p /app/logs
 
-# Add cron job
-RUN echo "0 11 * * * cd /app && python /app/sync.py >> /app/logs/gaparr.log 2>&1" > /etc/cron.d/gaparr-cron && \
-    chmod 0644 /etc/cron.d/gaparr-cron && \
-    crontab /etc/cron.d/gaparr-cron
+# Create entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Create log file
-RUN touch /app/logs/gaparr.log
-
-CMD ["cron", "-f"]
+ENTRYPOINT ["/entrypoint.sh"]

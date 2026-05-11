@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   gaparr:
-    build: .
+    image: plexeum/gaparr:latest
     container_name: gaparr
     restart: unless-stopped
     volumes:
@@ -10,3 +8,4 @@ services:
       - ./logs:/app/logs
     environment:
       - TZ=America/New_York
+      - CRON_SCHEDULE=0 11 * * *
