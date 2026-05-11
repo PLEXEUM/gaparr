@@ -8,5 +8,8 @@ echo "$SCHEDULE cd /app && python /app/sync.py 2>&1 | tee -a /app/logs/gaparr.lo
 chmod 0644 /etc/cron.d/gaparr-cron
 crontab /etc/cron.d/gaparr-cron
 
-# Start cron in foreground and also show output
-cron -f 2>&1
+# Start cron in background
+cron
+
+# Tail the log file to stdout so docker logs shows it
+tail -f /app/logs/gaparr.log
