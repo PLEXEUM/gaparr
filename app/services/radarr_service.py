@@ -53,6 +53,22 @@ class RadarrClient:
         except Exception as e:
             return False, f"Connection failed: {str(e)}"
 
+    async def _get_default_quality_profile_id(self) -> Optional[int]:
+        """Fetch the first available quality profile ID from Radarr."""
+        try:
+            profiles = await self._request("GET", "qualityprofile")
+            if profiles and len(profiles) > 0:
+                profile_id = profiles[0].get("id")
+                profile_name = profiles[0].get("name")
+                logger.info(f"Using quality profile: {profile_name} (ID: {profile_id})")
+                return profile_id
+            else:
+                logger.error("No quality profiles found in Radarr")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to fetch quality profiles: {e}")
+            return None
+
     async def get_movies(self, page_size: int = 100) -> List[Dict[str, Any]]:
         """Fetch all movies from Radarr (paginated)."""
         all_movies = []
@@ -156,31 +172,39 @@ class RadarrClient:
     ) -> Dict[str, Any]:
         """
         Add a movie to Radarr using TMDB ID.
-        
+    
         Args:
             tmdb_id: TMDB movie ID
             title: Movie title
             root_folder_path: Root folder path in Radarr
-            quality_profile_id: Quality profile ID (optional, uses Radarr default if not specified)
+            quality_profile_id: Quality profile ID (optional, auto-fetches if not specified)
             monitor: Monitoring setting ("movieOnly", "all", "none")
             search_now: Whether to trigger search after adding
         """
+        # Auto-fetch quality profile if not provided
+        final_quality_profile_id = quality_profile_id
+        if not final_quality_profile_id:
+            final_quality_profile_id = await self._get_default_quality_profile_id()
+            if not final_quality_profile_id:
+                raise Exception("No quality profile found in Radarr. Please configure at least one quality profile.")
+    
+        # Build complete payload with ALL required fields
         payload = {
             "tmdbId": tmdb_id,
             "title": title,
+            "qualityProfileId": final_quality_profile_id,
             "rootFolderPath": root_folder_path,
+            "minimumAvailability": "released",  # REQUIRED field
+            "monitored": True,                   # Top-level monitored flag
             "addOptions": {
                 "monitor": monitor,
                 "searchForMovie": search_now
             }
         }
 
-        # Only add quality profile if specified (otherwise Radarr uses default)
-        if quality_profile_id:
-            payload["qualityProfileId"] = quality_profile_id
-
         logger.info(f"Adding movie to Radarr: {title} (TMDB: {tmdb_id})")
-        
+        logger.debug(f"Payload: {payload}")
+
         try:
             result = await self._request("POST", "movie", json=payload)
             logger.info(f"Successfully added {title} to Radarr")
