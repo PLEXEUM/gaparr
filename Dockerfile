@@ -7,12 +7,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY sync.py .
+COPY sync.py /app/sync.py
 
 RUN mkdir -p /app/logs
-
-# Copy the script to be run
-COPY sync.py /app/sync.py
 
 # Add cron job
 RUN echo "0 11 * * * cd /app && python /app/sync.py >> /app/logs/gaparr.log 2>&1" > /etc/cron.d/gaparr-cron && \
