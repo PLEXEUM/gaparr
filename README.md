@@ -97,7 +97,9 @@ docker exec -it gaparr python sync.py
 The script runs automatically at 2:00 AM daily. To change the schedule, edit the command in `docker-compose.yml`:
 
 ```yaml
-command: sh -c "echo '0 2 * * * python /app/sync.py' | crontab - && crond -f"
+environment:
+  - TZ=America/New_York
+  - CRON_SCHEDULE=0 11 * * *
 ```
 
 Or use your preferred scheduling method.
