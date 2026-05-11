@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Log rotation - keep last 1000 lines if file exceeds 10MB
+LOG_FILE="/app/logs/gaparr.log"
+if [ -f "$LOG_FILE" ] && [ $(stat -c%s "$LOG_FILE") -gt 10485760 ]; then
+    tail -n 1000 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+fi
+
 # Set default schedule if not provided
 SCHEDULE="${CRON_SCHEDULE:-0 2 * * *}"
 
