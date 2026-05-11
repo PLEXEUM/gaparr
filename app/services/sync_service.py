@@ -123,6 +123,36 @@ class SyncService:
         """Get list of ignored movie TMDB IDs."""
         return self._state.get("ignored_movies", [])
 
+    def set_last_scan_movies(self, missing_movies: List[Dict[str, Any]], dry_run: bool = False) -> None:
+        """Store the last scan results for display."""
+        self._state["last_scan"] = {
+            "timestamp": datetime.now().isoformat(),
+            "missing_movies": missing_movies,
+            "dry_run": dry_run,
+            "total_missing": len(missing_movies)
+        }
+        self._save_state()
+        logger.info(f"Saved last scan results: {len(missing_movies)} missing movies")
+
+    def get_last_scan_movies(self) -> Dict[str, Any]:
+        """Get the last scan results."""
+        return self._state.get("last_scan", {
+            "timestamp": None,
+            "missing_movies": [],
+            "total_missing": 0,
+            "dry_run": False
+        })
+
+    def clear_last_scan(self) -> None:
+        """Clear the last scan results."""
+        self._state["last_scan"] = {
+            "timestamp": None,
+            "missing_movies": [],
+            "total_missing": 0,
+            "dry_run": False
+        }
+        self._save_state()
+
     def get_scan_status(self) -> dict:
         """Get current scan status for toast notification."""
         # Calculate ETA if scanning
@@ -214,12 +244,15 @@ class SyncService:
     ) -> Dict[str, Any]:
         """
         Find missing collection movies and add them to Radarr, respecting daily limit.
-        
+                    
         Returns:
             Dict with sync results: added_count, skipped_count, missing_movies list
         """
         # Reset daily counter if needed
         self._reset_daily_counter()
+
+        # Clear previous scan results
+        self.clear_last_scan()
         
         # Reset and start scan status
         self.reset_scan_status()
@@ -252,13 +285,19 @@ class SyncService:
             ignore_movies=self.get_ignored_movies()
         )
 
+        # Save results for dashboard
+        self.set_last_scan_movies(missing_movies, dry_run=False)
+
         # Update status with TMDB stats
         cache_stats = tmdb_service.get_cache_stats()
         self.update_scan_status(
             api_calls=cache_stats.get("session_api_calls", 0),
             cache_hits=cache_stats.get("session_cache_hits", 0)
         )
-
+        
+        # Then continue with the rest:
+        logger.info(f"Found {len(missing_movies)} missing, ...")
+        
         # Filter out already synced movies
         unsynced_missing = [
             m for m in missing_movies

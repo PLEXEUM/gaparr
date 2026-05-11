@@ -219,6 +219,11 @@ async def add_ignored_collection(data: IgnoreCollectionInput, request: Request) 
     sync_service.add_ignored_collection(data.collection_id)
     return {"success": True, "message": f"Collection {data.collection_id} ignored"}
 
+@router.get("/last-scan")
+async def get_last_scan(request: Request) -> Dict[str, Any]:
+    """Get the results of the most recent scan (for dashboard display)."""
+    sync_service = SyncService()
+    return sync_service.get_last_scan_movies()
 
 @router.delete("/ignore/collection/{collection_id}")
 async def remove_ignored_collection(collection_id: int, request: Request) -> Dict[str, Any]:

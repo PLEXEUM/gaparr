@@ -396,6 +396,20 @@
                     scanStatus.style.color = 'var(--success)';
                     showToast('Sync started in background. Check progress above.', 'success');
                     
+                    // ADD THESE LINES RIGHT AFTER the showToast line:
+                    // Start checking for scan results
+                    startCheckingForScanResults();
+                    
+                    // Clear the table to show "scanning..." state
+                    document.getElementById('missing-table-body').innerHTML = `
+                        <tr>
+                            <td colspan="5" class="text-center py-8" style="color: var(--text-secondary);">
+                                🔍 Scan in progress... Results will appear here when complete
+                            </td>
+                        </tr>
+                    `;
+                    document.getElementById('stat-missing').textContent = '?';
+                    
                     // Keep polling - the background task will update progress
                     // The polling will auto-hide when complete
                     
@@ -454,6 +468,35 @@
             if (m === '>') return '&gt;';
             return m;
         });
+    }
+
+    let lastScanCheckInterval = null;
+
+    function startCheckingForScanResults() {
+        if (lastScanCheckInterval) clearInterval(lastScanCheckInterval);
+    
+        lastScanCheckInterval = setInterval(async () => {
+            try {
+                const res = await fetch('/api/sync/last-scan');
+                const data = await res.json();
+            
+                if (data.missing_movies && data.missing_movies.length > 0) {
+                    // Display the missing movies
+                    allMissingMovies = data.missing_movies;
+                    displayedMovieCount = 20;
+                    renderMovieTable();
+                    document.getElementById('stat-missing').textContent = data.total_missing;
+                
+                    // Stop checking once we have results
+                    if (lastScanCheckInterval) {
+                        clearInterval(lastScanCheckInterval);
+                        lastScanCheckInterval = null;
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to get last scan results:', e);
+            }
+        }, 2000); // Check every 2 seconds
     }
 </script>
 {% endblock %}

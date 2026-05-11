@@ -436,11 +436,15 @@ class TMDBService:
         hide_future: bool = True,
         ignore_collections: Optional[List[int]] = None,
         ignore_movies: Optional[List[int]] = None,
-        batch_size: int = 20
+        batch_size: int = 20,
+        progress_callback: Optional[callable] = None  # NEW - for progress updates
     ) -> List[Dict[str, Any]]:
         """
         Find missing movies from collections based on owned movies.
         OPTIMIZED: Uses caching, batch processing, and parallel fetching.
+    
+        Args:
+            progress_callback: Async function called with (message, current, total)
         """
         if ignore_collections is None:
             ignore_collections = []
@@ -448,99 +452,151 @@ class TMDBService:
             ignore_movies = []
 
         logger.info(f"Finding collection gaps for {len(owned_tmdb_ids)} owned movies")
-        
+    
+        # Send initial progress update
+        if progress_callback:
+            await progress_callback(f"Analyzing {len(owned_tmdb_ids)} movies for collections...", 0, len(owned_tmdb_ids))
+    
         # Step 1: Find unique collection IDs using cached lookups
         seen_collections: Set[int] = set()
         owned_list = list(owned_tmdb_ids)
-        
+        processed_count = 0
+    
         # Process in batches to avoid memory issues
         for i in range(0, len(owned_list), batch_size):
-            batch = owned_list[i:i+batch_size]
+         batch = owned_list[i:i+batch_size]
+        
             # Get collection IDs for batch
             for tmdb_id in batch:
                 collection_id = await self.get_movie_collection_id(tmdb_id, use_cache=True)
+                processed_count += 1
+            
+                # Send progress update every 100 movies or at batch completion
+                if progress_callback and (processed_count % 100 == 0 or processed_count == len(owned_list)):
+                    await progress_callback(
+                        f"Scanning movies for collections... ({processed_count}/{len(owned_list)})", 
+                        processed_count, 
+                        len(owned_list)
+                    )
+            
                 if not collection_id:
                     continue
-                
+            
                 if collection_id in ignore_collections:
                     continue
-                    
+                
                 if collection_id not in seen_collections:
                     seen_collections.add(collection_id)
-        
+    
         logger.info(f"Found {len(seen_collections)} unique collections to fetch")
-        
-        # Step 2: Fetch ALL collections in parallel with concurrency limit
-        semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent API calls
-        
-        async def fetch_collection(cid):
-            async with semaphore:
-                return await self.get_collection(cid, use_cache=True)
-        
-        if seen_collections:
-            tasks = [fetch_collection(cid) for cid in seen_collections]
-            collections = await asyncio.gather(*tasks)
-        else:
-            collections = []
-        
-        # Step 3: Build missing movies from fetched collections
-        missing_movies: Dict[int, Dict] = {}
-        
-        for collection in collections:
-            if not collection:
-                continue
-                
-            collection_name = collection.get("name", "Unknown Collection")
-            collection_id = collection.get("id")
-            parts = collection.get("parts", [])
+    
+        # Send collection fetch progress update
+        if progress_callback:
+        await progress_callback(
+            f"Found {len(seen_collections)} collections. Fetching from TMDB...", 
+            0, 
+            len(seen_collections)
+        )
+    
+    # Step 2: Fetch ALL collections in parallel with concurrency limit
+    semaphore = asyncio.Semaphore(settings.max_concurrent_api_calls if hasattr(settings, 'max_concurrent_api_calls') else 10)
+    collection_ids_list = list(seen_collections)
+    
+    async def fetch_collection_with_progress(cid, idx):
+        async with semaphore:
+            # Send progress update for each collection fetch
+            if progress_callback and idx % 3 == 0:  # Update every 3 collections to avoid spam
+                await progress_callback(
+                    f"Fetching collection {idx + 1}/{len(collection_ids_list)}...", 
+                    idx + 1, 
+                    len(collection_ids_list)
+                )
+            return await self.get_collection(cid, use_cache=True)
+    
+    if collection_ids_list:
+        tasks = [fetch_collection_with_progress(cid, idx) for idx, cid in enumerate(collection_ids_list)]
+        collections = await asyncio.gather(*tasks)
+    else:
+        collections = []
+    
+    # Send processing progress update
+    if progress_callback:
+        await progress_callback("Building missing movies list...", 0, 1)
+    
+    # Step 3: Build missing movies from fetched collections
+    missing_movies: Dict[int, Dict] = {}
+    
+    for idx, collection in enumerate(collections):
+        if not collection:
+            continue
             
-            for part in parts:
-                part_id = part.get("id")
-                if not part_id:
-                    continue
-                
-                # Skip if already owned
-                if part_id in owned_tmdb_ids:
-                    continue
-                
-                # Skip ignored movies
-                if part_id in ignore_movies:
-                    continue
-                
-                # Skip future releases if setting enabled
-                if hide_future:
-                    release_date_str = part.get("release_date", "")
-                    if release_date_str:
-                        try:
-                            release_date = datetime.fromisoformat(release_date_str[:10]).date()
-                            if release_date > datetime.now().date():
-                                logger.debug(f"Skipping future release: {part.get('title')} ({release_date})")
-                                continue
-                        except ValueError:
-                            pass
-                
-                # Add to missing movies dict (deduplicate)
-                if part_id not in missing_movies:
-                    poster = part.get("poster_path")
-                    missing_movies[part_id] = {
-                        "tmdb_id": part_id,
-                        "title": part.get("title", "Unknown"),
-                        "year": part.get("release_date", "")[:4] if part.get("release_date") else "N/A",
-                        "release_date": part.get("release_date", ""),
-                        "collection_name": collection_name,
-                        "collection_id": collection_id,
-                        "poster_url": f"{self.image_base_url}{poster}" if poster else None,
-                        "overview": part.get("overview", "")
-                    }
+        # Send progress every 5 collections
+        if progress_callback and idx % 5 == 0:
+            await progress_callback(
+                f"Processing collection {idx + 1}/{len(collections)}...", 
+                idx + 1, 
+                len(collections)
+            )
+            
+        collection_name = collection.get("name", "Unknown Collection")
+        collection_id = collection.get("id")
+        parts = collection.get("parts", [])
         
-        # Convert to sorted list
-        result = list(missing_movies.values())
-        result.sort(key=lambda x: (x["collection_name"], x["year"]))
-        
-        logger.info(f"Found {len(result)} missing movies from {len(seen_collections)} collections "
-                   f"(API calls: {self._stats['api_calls']}, Cache hits: {self._stats['cache_hits']})")
-        
-        return result
+        for part in parts:
+            part_id = part.get("id")
+            if not part_id:
+                continue
+            
+            # Skip if already owned
+            if part_id in owned_tmdb_ids:
+                continue
+            
+            # Skip ignored movies
+            if part_id in ignore_movies:
+                continue
+            
+            # Skip future releases if setting enabled
+            if hide_future:
+                release_date_str = part.get("release_date", "")
+                if release_date_str:
+                    try:
+                        release_date = datetime.fromisoformat(release_date_str[:10]).date()
+                        if release_date > datetime.now().date():
+                            logger.debug(f"Skipping future release: {part.get('title')} ({release_date})")
+                            continue
+                    except ValueError:
+                        pass
+            
+            # Add to missing movies dict (deduplicate)
+            if part_id not in missing_movies:
+                poster = part.get("poster_path")
+                missing_movies[part_id] = {
+                    "tmdb_id": part_id,
+                    "title": part.get("title", "Unknown"),
+                    "year": part.get("release_date", "")[:4] if part.get("release_date") else "N/A",
+                    "release_date": part.get("release_date", ""),
+                    "collection_name": collection_name,
+                    "collection_id": collection_id,
+                    "poster_url": f"{self.image_base_url}{poster}" if poster else None,
+                    "overview": part.get("overview", "")
+                }
+    
+    # Convert to sorted list
+    result = list(missing_movies.values())
+    result.sort(key=lambda x: (x["collection_name"], x["year"]))
+    
+    # Final progress update
+    if progress_callback:
+        await progress_callback(
+            f"Complete! Found {len(result)} missing movies", 
+            len(result), 
+            len(result)
+        )
+    
+    logger.info(f"Found {len(result)} missing movies from {len(seen_collections)} collections "
+               f"(API calls: {self._stats['api_calls']}, Cache hits: {self._stats['cache_hits']})")
+    
+    return result
 
     async def clear_cache(self, full_clear: bool = False):
         """Clear TMDB cache."""
