@@ -37,8 +37,8 @@
                     ↻ Refresh Page
                 </button>
             </div>
-            <div class="text-sm" style="color: var(--text-secondary);">
-                Last sync: <span id="last-sync">Never</span>
+            <div class="text-sm" style="color: var(--text-secondary);" id="last-scan-time">
+                Last scan: <span id="last-scan-date">Never</span>
             </div>
         </div>
     </div>
@@ -137,20 +137,14 @@
         try {
             const res = await fetch('/api/sync/status');
             const data = await res.json();
-    
+
             if (data.configured) {
                 document.getElementById('stat-limit').textContent = data.daily_limit || 5;
-                // Show placeholder message - no scan performed
-                document.getElementById('missing-table-body').innerHTML = `
-                    <tr>
-                        <td colspan="5" class="text-center py-8" style="color: var(--text-secondary);">
-                            👆 Click "Sync Now" or "Dry Run" to scan for missing movies
-                        </td>
-                    </tr>
-                `;
-                document.getElementById('stat-missing').textContent = '?';
-                document.getElementById('stat-synced-today').textContent = '0';
-                document.getElementById('stat-remaining').textContent = '?';
+                document.getElementById('stat-synced-today').textContent = data.synced_today || 0;
+                document.getElementById('stat-remaining').textContent = data.remaining_today || '?';
+            
+                // NEW: Try to load cached scan results from previous run
+                await loadCachedScanResults();
             } else {
                 document.getElementById('missing-table-body').innerHTML = `
                     <tr>
@@ -162,6 +156,50 @@
             }
         } catch (e) {
             console.error('Failed to check config:', e);
+        }
+    }
+
+    // NEW FUNCTION: Load cached scan results from previous runs
+    async function loadCachedScanResults() {
+        try {
+            const res = await fetch('/api/sync/last-scan');
+            const data = await res.json();
+        
+            // Update last scan timestamp (moved here, inside try block)
+            if (data.timestamp) {
+                const date = new Date(data.timestamp);
+                document.getElementById('last-scan-date').textContent = date.toLocaleString();
+            }
+            if (data.missing_movies && data.missing_movies.length > 0) {
+                // Display cached missing movies
+                allMissingMovies = data.missing_movies;
+                displayedMovieCount = 20;
+                renderMovieTable();
+                document.getElementById('stat-missing').textContent = data.total_missing;
+                console.log(`Loaded ${data.total_missing} cached missing movies...`);
+            } else {
+                // No cached results - show placeholder
+                document.getElementById('missing-table-body').innerHTML = `
+                    <tr>
+                        <td colspan="5" class="text-center py-8" style="color: var(--text-secondary);">
+                            👆 Click "Sync Now" or "Dry Run" to scan for missing movies
+                        </td>
+                    </tr>
+                `;
+                document.getElementById('stat-missing').textContent = '?';
+            }
+        } catch (e) {
+            console.error('Failed to load cached scan results:', e);
+            // Show placeholder on error
+            document.getElementById('missing-table-body').innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center py-8" style="color: var(--text-secondary);">
+                        👆 Click "Sync Now" or "Dry Run" to scan for missing movies
+                    </td>
+                </tr>
+            `;
+            document.getElementById('stat-missing').textContent = '?';
+            // Remove the if(data.timestamp) block entirely
         }
     }
 
