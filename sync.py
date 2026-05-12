@@ -97,7 +97,7 @@ class RadarrClient:
                 "monitored": True,
                 "addOptions": {
                     "monitor": "movieOnly",
-                    "searchForMovie": False
+                    "searchForMovie": True
                 }
             }
             
