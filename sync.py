@@ -202,14 +202,18 @@ async def main():
             # Skip future releases if setting enabled
             if config.get("hide_future", True):
                 release_date = movie.get("release_date", "")
-                if release_date:
-                    try:
-                        release_date_obj = datetime.strptime(release_date[:10], "%Y-%m-%d")
-                        if release_date_obj > datetime.now():
-                            logger.debug(f"  Skipping future release: {movie.get('title')}")
-                            continue
-                    except:
-                        pass
+                if not release_date:
+                    # No release date - skip it (status rumored/unconfirmed)
+                    logger.debug(f"Skipping movie with no release date: {movie.get('title')}")
+                    continue
+                try:
+                    release_date_obj = datetime.strptime(release_date[:10], "%Y-%m-%d")
+                    if release_date_obj > datetime.now():
+                        logger.debug(f"Skipping future release: {movie.get('title')} ({release_date})")
+                        continue
+                except Exception as e:
+                    logger.debug(f"Failed to parse release date '{release_date}' for {movie.get('title')}: {e}")
+                    continue
             
             # Add to missing dict (deduplicate)
             if movie_id not in all_missing:
