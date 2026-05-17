@@ -127,20 +127,26 @@ class TMDBService:
             logger.debug(f"Failed to get collection for {tmdb_id}: {e}")
             return None
     
-    def get_collection_movies(self, collection_id: int) -> List[Dict]:
-        """Get all movies in a collection"""
+    def get_collection_details(self, collection_id: int) -> tuple:
+        """
+        Get collection details including name and movies.
+        Returns: (collection_name, list_of_movies)
+        """
         try:
-            # tmdbv3api doesn't have collection endpoint directly, use requests
             import requests
             url = f"https://api.themoviedb.org/3/collection/{collection_id}"
             params = {"api_key": self.movie_api.api_key, "language": "en-US"}
             resp = requests.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
-            return data.get("parts", [])
+        
+            collection_name = data.get("name", "Unknown")
+            movies = data.get("parts", [])
+        
+            return collection_name, movies
         except Exception as e:
             logger.warning(f"Failed to get collection {collection_id}: {e}")
-            return []
+            return "Unknown", []
 
 # ============================================================================
 # Main Logic
@@ -189,7 +195,8 @@ async def main():
     
     for coll_id in collection_ids:
         logger.info(f"  Fetching collection ID: {coll_id}")
-        movies = tmdb.get_collection_movies(coll_id)
+        collection_name, movies = tmdb.get_collection_details(coll_id)
+        
         for movie in movies:
             movie_id = movie.get("id")
             if not movie_id:
@@ -221,7 +228,7 @@ async def main():
                     "tmdb_id": movie_id,
                     "title": movie.get("title", "Unknown"),
                     "year": movie.get("release_date", "")[:4] if movie.get("release_date") else "N/A",
-                    "collection_name": movies[0].get("belongs_to_collection", {}).get("name", "Unknown") if movies else "Unknown",
+                    "collection_name": collection_name,
                     "release_date": movie.get("release_date", "")
                 }
     
