@@ -5,5 +5,7 @@
   "root_folder": "/movies",
   "daily_limit": 5,
   "auto_add": true,
-  "hide_future": true
+  "hide_future": true,
+  "max_collection_size": 13,
+  "ignored_collections": ["James Bond", "The Land Before Time"]
 }

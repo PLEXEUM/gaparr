@@ -56,6 +56,25 @@ def load_config() -> dict:
         if not config.get(field):
             logger.error(f"Missing required config field: {field}")
             sys.exit(1)
+
+    # ADD VALIDATION FOR NEW FIELDS:
+    # Validate max_collection_size is a positive integer if set
+    if "max_collection_size" in config:
+        try:
+            size = int(config["max_collection_size"])
+            if size < 0:
+                logger.error("max_collection_size must be a positive integer or 0 to disable")
+                sys.exit(1)
+            config["max_collection_size"] = size
+        except (ValueError, TypeError):
+            logger.error("max_collection_size must be a number")
+            sys.exit(1)
+    
+    # Validate ignored_collections is a list if set
+    if "ignored_collections" in config:
+        if not isinstance(config["ignored_collections"], list):
+            logger.error("ignored_collections must be a list of collection names")
+            sys.exit(1)
     
     return config
 
@@ -148,6 +167,18 @@ class TMDBService:
             logger.warning(f"Failed to get collection {collection_id}: {e}")
             return "Unknown", []
 
+     # ADD THIS NEW METHOD:
+    def is_collection_ignored(self, collection_name: str, ignored_list: List[str]) -> bool:
+        """Check if a collection should be ignored (case-insensitive partial match)"""
+        if not ignored_list:
+            return False
+        
+        collection_lower = collection_name.lower()
+        for ignored in ignored_list:
+            if ignored.lower() in collection_lower:
+                return True
+        return False
+
 # ============================================================================
 # Main Logic
 # ============================================================================
@@ -193,9 +224,23 @@ async def main():
     logger.info("Step 3: Fetching collection details from TMDB...")
     all_missing = {}
     
+    # Get config options for filtering
+    max_collection_size = config.get("max_collection_size")
+    ignored_collections = config.get("ignored_collections", [])
+    
     for coll_id in collection_ids:
         logger.info(f"  Fetching collection ID: {coll_id}")
         collection_name, movies = tmdb.get_collection_details(coll_id)
+        
+        # CHECK 1: Skip by name (ignored collections)
+        if tmdb.is_collection_ignored(collection_name, ignored_collections):
+            logger.info(f"  Skipping ignored collection: {collection_name}")
+            continue
+        
+        # CHECK 2: Skip by size (large collections)
+        if max_collection_size and len(movies) > max_collection_size:
+            logger.info(f"  Skipping large collection: {collection_name} ({len(movies)} movies > {max_collection_size} limit)")
+            continue
         
         for movie in movies:
             movie_id = movie.get("id")
@@ -241,6 +286,23 @@ async def main():
     
     for movie in missing_movies:
         logger.info(f"  - {movie['title']} ({movie['year']}) from {movie['collection_name']}")
+    
+    # ADD THIS OPTIONAL ENHANCEMENT:
+    logger.info("=" * 50)
+    logger.info("FILTERING SUMMARY")
+    logger.info("=" * 50)
+
+    # Log which collections were ignored by name
+    if ignored_collections:
+        logger.info(f"Ignored collections by name: {', '.join(ignored_collections)}")
+    else:
+        logger.info("No collections ignored by name")
+    
+    # Log the size limit that was applied
+    if max_collection_size:
+        logger.info(f"Collections with > {max_collection_size} movies were skipped")
+    else:
+        logger.info("No collection size limit applied")
     
     # Step 4: Add movies to Radarr (up to daily limit)
     if config.get("auto_add", False):

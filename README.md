@@ -70,6 +70,8 @@ Or view the log file: `logs/gaparr.log`
 | `daily_limit` | Max movies to add per day (1-50) |
 | `auto_add` | true = automatic, false = dry run |
 | `hide_future` | true = skip unreleased movies |
+| `max_collection_size` | Skip collections with more than X movies (0 or omit = no limit) |
+| `ignored_collections` | List of collection names to skip (case-insensitive partial match) |
 
 ---
 
