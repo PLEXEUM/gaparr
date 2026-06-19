@@ -6,6 +6,7 @@
   "daily_limit": 5,
   "auto_add": true,
   "hide_future": true,
-  "max_collection_size": 13,
-  "ignored_collections": ["James Bond", "The Land Before Time"]
+  "max_collection_size": 0,
+  "ignored_collections": [],
+  "ignored_genres": ["Documentary", "TV Movie", "Music"]
 }

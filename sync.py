@@ -76,6 +76,17 @@ def load_config() -> dict:
             logger.error("ignored_collections must be a list of collection names")
             sys.exit(1)
     
+    # Validate ignored_genres is a list if set
+    if "ignored_genres" in config:
+        if not isinstance(config["ignored_genres"], list):
+            logger.error("ignored_genres must be a list of genre names")
+            sys.exit(1)
+    
+    # Set defaults for optional fields
+    config.setdefault("ignored_genres", [])
+    config.setdefault("ignored_collections", [])
+    config.setdefault("max_collection_size", 0)
+
     return config
 
 # ============================================================================
@@ -178,6 +189,17 @@ class TMDBService:
             if ignored.lower() in collection_lower:
                 return True
         return False
+    
+    def get_movie_genres(self, tmdb_id: int) -> List[str]:
+        """Get genre names for a movie"""
+        try:
+            movie = self.movie_api.details(tmdb_id)
+            genres = getattr(movie, "genres", [])
+            return [g.get("name", "") for g in genres if g.get("name")]
+        except Exception as e:
+            logger.debug(f"Failed to get genres for {tmdb_id}: {e}")
+            return []
+    
 
 # ============================================================================
 # Main Logic
@@ -267,6 +289,14 @@ async def main():
                     logger.debug(f"Failed to parse release date '{release_date}' for {movie.get('title')}: {e}")
                     continue
             
+            # Check genre filter
+            ignored_genres = config.get("ignored_genres", [])
+            if ignored_genres:
+                genres = tmdb.get_movie_genres(movie_id)
+                if any(genre in ignored_genres for genre in genres):
+                    logger.debug(f"Skipping movie with ignored genre: {movie.get('title')} (Genres: {', '.join(genres)})")
+                    continue
+            
             # Add to missing dict (deduplicate)
             if movie_id not in all_missing:
                 all_missing[movie_id] = {
@@ -285,7 +315,10 @@ async def main():
     logger.info("=" * 50)
     
     for movie in missing_movies:
-        logger.info(f"  - {movie['title']} ({movie['year']}) from {movie['collection_name']}")
+        # Get genres for display
+        genres = tmdb.get_movie_genres(movie["tmdb_id"])
+        genres_str = f" (Genres: {', '.join(genres)})" if genres else ""
+        logger.info(f"  - {movie['title']} ({movie['year']}) from {movie['collection_name']}{genres_str}")
     
     # ADD THIS OPTIONAL ENHANCEMENT:
     logger.info("=" * 50)
@@ -303,6 +336,13 @@ async def main():
         logger.info(f"Collections with > {max_collection_size} movies were skipped")
     else:
         logger.info("No collection size limit applied")
+
+    # Log ignored genres
+    ignored_genres = config.get("ignored_genres", [])
+    if ignored_genres:
+        logger.info(f"Ignored genres: {', '.join(ignored_genres)}")
+    else:
+        logger.info("No genres ignored")
     
     # Step 4: Add movies to Radarr (up to daily limit)
     if config.get("auto_add", False):
