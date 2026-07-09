@@ -10,7 +10,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Optional
 
 import httpx
 from tmdbv3api import TMDb, Movie as TMDbMovie
@@ -97,6 +97,42 @@ class RadarrClient:
     def __init__(self, url: str, api_key: str):
         self.url = url.rstrip("/")
         self.headers = {"X-Api-Key": api_key}
+
+    async def get_root_folders(self):
+        """Get available root folders from Radarr."""
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(f"{self.url}/api/v3/rootfolder", headers=self.headers)
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch root folders: {e}")
+            return []
+
+    async def get_root_folder_path(self, configured_path: str):
+        """Get the exact root folder path from Radarr that matches the configured path."""
+        root_folders = await self.get_root_folders()
+        
+        if not root_folders:
+            logger.error("No root folders found in Radarr")
+            return None
+        
+        # Normalize the configured path for comparison
+        configured_normalized = configured_path.replace('\\\\', '\\').replace('/', '\\').lower().rstrip('\\')
+        
+        for folder in root_folders:
+            folder_path = folder.get('path', '')
+            folder_normalized = folder_path.replace('/', '\\').lower().rstrip('\\')
+            
+            if folder_normalized == configured_normalized:
+                logger.info(f"Found matching root folder: {folder_path}")
+                return folder_path
+        
+        logger.error(f"Root folder '{configured_path}' not found in Radarr")
+        logger.info("Available root folders in Radarr:")
+        for folder in root_folders:
+            logger.info(f"  - {folder.get('path')}")
+        return None
     
     async def get_movies(self) -> List[Dict]:
         """Fetch all movies from Radarr"""
@@ -220,6 +256,13 @@ async def main():
     # Initialize clients
     radarr = RadarrClient(config["radarr_url"], config["radarr_api_key"])
     tmdb = TMDBService(config["tmdb_api_key"])
+    
+    # Get the correct root folder path from Radarr
+    root_path = await radarr.get_root_folder_path(config["root_folder"])
+    if not root_path:
+        logger.error("Could not find a valid root folder in Radarr. Please check your root_folder setting.")
+        sys.exit(1)
+    logger.info(f"Using Radarr root folder: {root_path}")
     
     # Step 1: Get movies from Radarr
     logger.info("Step 1: Fetching movies from Radarr...")
@@ -359,7 +402,7 @@ async def main():
                 success = await radarr.add_movie(
                     movie["tmdb_id"],
                     movie["title"],
-                    config["root_folder"]
+                    root_path 
                 )
                 if success:
                     added_count += 1
