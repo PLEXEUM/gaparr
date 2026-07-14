@@ -4,6 +4,7 @@
   "tmdb_api_key": "YOUR_TMDB_API_KEY_HERE",
   "root_folder": "/movies",
   "daily_limit": 5,
+  "min_runtime": 60, 
   "auto_add": true,
   "hide_future": true,
   "max_collection_size": 0,

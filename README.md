@@ -38,8 +38,12 @@ Edit `config.json` with your settings:
   "tmdb_api_key": "YOUR_TMDB_API_KEY",
   "root_folder": "/movies",
   "daily_limit": 5,
+  "min_runtime": 60,
   "auto_add": true,
-  "hide_future": true
+  "hide_future": true,
+  "max_collection_size": 0,
+  "ignored_collections": [],
+  "ignored_genres": ["Documentary", "TV Movie", "Music"]
 }
 ```
 
@@ -68,6 +72,7 @@ Or view the log file: `logs/gaparr.log`
 | `tmdb_api_key` | From themoviedb.org (create free account) |
 | `root_folder` | Where Radarr stores movies |
 | `daily_limit` | Max movies to add per day (1-50) |
+| `min_runtime` | Skip movies shorter than this many minutes (0 or omit = no limit) |
 | `auto_add` | true = automatic, false = dry run |
 | `hide_future` | true = skip unreleased movies |
 | `max_collection_size` | Skip collections with more than X movies (0 or omit = no limit) |

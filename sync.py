@@ -82,10 +82,23 @@ def load_config() -> dict:
             logger.error("ignored_genres must be a list of genre names")
             sys.exit(1)
     
+    # Validate min_runtime is a positive integer if set
+    if "min_runtime" in config:
+        try:
+            runtime = int(config["min_runtime"])
+            if runtime < 0:
+                logger.error("min_runtime must be a positive integer or 0 to disable")
+                sys.exit(1)
+            config["min_runtime"] = runtime
+        except (ValueError, TypeError):
+            logger.error("min_runtime must be a number")
+            sys.exit(1)
+    
     # Set defaults for optional fields
     config.setdefault("ignored_genres", [])
     config.setdefault("ignored_collections", [])
     config.setdefault("max_collection_size", 0)
+    config.setdefault("min_runtime", 0)
 
     return config
 
@@ -236,6 +249,15 @@ class TMDBService:
             logger.debug(f"Failed to get genres for {tmdb_id}: {e}")
             return []
     
+    def get_movie_runtime(self, tmdb_id: int) -> Optional[int]:
+        """Get runtime in minutes for a movie, or None if not available"""
+        try:
+            movie = self.movie_api.details(tmdb_id)
+            runtime = getattr(movie, "runtime", None)
+            return runtime if runtime and runtime > 0 else None
+        except Exception as e:
+            logger.debug(f"Failed to get runtime for {tmdb_id}: {e}")
+            return None
 
 # ============================================================================
 # Main Logic
@@ -338,6 +360,14 @@ async def main():
                 genres = tmdb.get_movie_genres(movie_id)
                 if any(genre in ignored_genres for genre in genres):
                     logger.debug(f"Skipping movie with ignored genre: {movie.get('title')} (Genres: {', '.join(genres)})")
+                    continue
+
+            # Check minimum runtime
+            min_runtime = config.get("min_runtime", 0)
+            if min_runtime > 0:
+                runtime = tmdb.get_movie_runtime(movie_id)
+                if runtime is None or runtime < min_runtime:
+                    logger.debug(f"Skipping short movie: {movie.get('title')} ({runtime or 'unknown'} minutes)")
                     continue
             
             # Add to missing dict (deduplicate)
