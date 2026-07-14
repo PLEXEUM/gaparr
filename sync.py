@@ -328,6 +328,7 @@ async def main():
         collection_data[collection_name] = {
             "owned_movies": [],
             "skipped_count": 0,
+            "skipped_actionable": 0,
             "skip_reason": ""
         }
         
@@ -381,6 +382,7 @@ async def main():
                 if any(genre in ignored_genres for genre in genres):
                     logger.debug(f"Skipping movie with ignored genre: {movie.get('title')} (Genres: {', '.join(genres)})")
                     collection_data[collection_name]["skipped_count"] += 1
+                    collection_data[collection_name]["skipped_actionable"] += 1
                     continue
 
             # Check minimum runtime
@@ -390,6 +392,7 @@ async def main():
                 if runtime is None or runtime < min_runtime:
                     logger.debug(f"Skipping short movie: {movie.get('title')} ({runtime or 'unknown'} minutes)")
                     collection_data[collection_name]["skipped_count"] += 1
+                    collection_data[collection_name]["skipped_actionable"] += 1 
                     continue
             
             # Add to missing dict (deduplicate)
@@ -408,7 +411,7 @@ async def main():
     # Filter to collections that have owned movies AND skipped movies
     collections_with_skips = {
         name: data for name, data in collection_data.items()
-        if data["owned_movies"] and data["skipped_count"] > 0
+        if data["owned_movies"] and data["skipped_actionable"] > 0
     }
     
     if collections_with_skips:
@@ -432,14 +435,19 @@ async def main():
             
             # Show skipped count with reason
             if data["skip_reason"]:
-                logger.info(f"   ⚠️ {data['skipped_count']} missing movies were skipped ({data['skip_reason']})")
+                logger.info(f"   ⚠️ {data['skipped_actionable']} missing movies were skipped ({data['skip_reason']})")
             else:
-                logger.info(f"   ⚠️ {data['skipped_count']} missing movies were skipped by your filters")
+                # Show actionable skips, mention if future skips were also skipped
+                if data["skipped_count"] > data["skipped_actionable"]:
+                    future_skips = data["skipped_count"] - data["skipped_actionable"]
+                    logger.info(f"   ⚠️ {data['skipped_actionable']} missing movies were skipped by your filters ({future_skips} future/unreleased movies not shown)")
+                else:
+                    logger.info(f"   ⚠️ {data['skipped_actionable']} missing movies were skipped by your filters")
         
         logger.info("=" * 50)
-        total_skipped = sum(data["skipped_count"] for data in collections_with_skips.values())
+        total_actionable = sum(data["skipped_actionable"] for data in collections_with_skips.values())
         logger.info(f"Collections with skipped movies: {len(collections_with_skips)}")
-        logger.info(f"Total skipped movies: {total_skipped}")
+        logger.info(f"Total skipped movies: {total_actionable}")
         logger.info("=" * 50)
         logger.info("")
     
