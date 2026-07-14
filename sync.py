@@ -314,19 +314,31 @@ async def main():
     # Get config options for filtering
     max_collection_size = config.get("max_collection_size")
     ignored_collections = config.get("ignored_collections", [])
+
+    # Track collection data for reporting
+    collection_data = {}  # collection_name -> {owned: [], skipped_count: 0, reason: ""}
     
     for coll_id in collection_ids:
         logger.info(f"  Fetching collection ID: {coll_id}")
         collection_name, movies = tmdb.get_collection_details(coll_id)
+
+        # Initialize tracking for this collection
+        collection_data[collection_name] = {
+            "owned_movies": [],
+            "skipped_count": 0,
+            "skip_reason": ""
+        }
         
         # CHECK 1: Skip by name (ignored collections)
         if tmdb.is_collection_ignored(collection_name, ignored_collections):
             logger.info(f"  Skipping ignored collection: {collection_name}")
+            collection_data[collection_name]["skip_reason"] = "Ignored by name"
             continue
         
         # CHECK 2: Skip by size (large collections)
         if max_collection_size and len(movies) > max_collection_size:
             logger.info(f"  Skipping large collection: {collection_name} ({len(movies)} movies > {max_collection_size} limit)")
+            collection_data[collection_name]["skip_reason"] = f"Collection size ({len(movies)} > {max_collection_size} limit)"
             continue
         
         for movie in movies:
@@ -334,8 +346,12 @@ async def main():
             if not movie_id:
                 continue
             
-            # Skip if already owned
+            # Skip if already owned - track it for the report
             if movie_id in owned_tmdb_ids:
+                # Find the movie title to add to owned list
+                movie_title = movie.get("title", "Unknown")
+                release_year = movie.get("release_date", "")[:4] if movie.get("release_date") else "N/A"
+                collection_data[collection_name]["owned_movies"].append(f"{movie_title} ({release_year})")
                 continue
             
             # Skip future releases if setting enabled
@@ -344,11 +360,13 @@ async def main():
                 if not release_date:
                     # No release date - skip it (status rumored/unconfirmed)
                     logger.debug(f"Skipping movie with no release date: {movie.get('title')}")
+                    collection_data[collection_name]["skipped_count"] += 1
                     continue
                 try:
                     release_date_obj = datetime.strptime(release_date[:10], "%Y-%m-%d")
                     if release_date_obj > datetime.now():
                         logger.debug(f"Skipping future release: {movie.get('title')} ({release_date})")
+                        collection_data[collection_name]["skipped_count"] += 1
                         continue
                 except Exception as e:
                     logger.debug(f"Failed to parse release date '{release_date}' for {movie.get('title')}: {e}")
@@ -360,6 +378,7 @@ async def main():
                 genres = tmdb.get_movie_genres(movie_id)
                 if any(genre in ignored_genres for genre in genres):
                     logger.debug(f"Skipping movie with ignored genre: {movie.get('title')} (Genres: {', '.join(genres)})")
+                    collection_data[collection_name]["skipped_count"] += 1
                     continue
 
             # Check minimum runtime
@@ -368,6 +387,7 @@ async def main():
                 runtime = tmdb.get_movie_runtime(movie_id)
                 if runtime is None or runtime < min_runtime:
                     logger.debug(f"Skipping short movie: {movie.get('title')} ({runtime or 'unknown'} minutes)")
+                    collection_data[collection_name]["skipped_count"] += 1
                     continue
             
             # Add to missing dict (deduplicate)
@@ -379,6 +399,51 @@ async def main():
                     "collection_name": collection_name,
                     "release_date": movie.get("release_date", "")
                 }
+    
+    # ========================================================================
+    # Collection Inventory Report
+    # ========================================================================
+    # Filter to collections that have owned movies AND skipped movies
+    collections_with_skips = {
+        name: data for name, data in collection_data.items()
+        if data["owned_movies"] and data["skipped_count"] > 0
+    }
+    
+    if collections_with_skips:
+        logger.info("=" * 50)
+        logger.info("COLLECTION INVENTORY (MOVIES YOU OWN)")
+        logger.info("=" * 50)
+        
+        for collection_name, data in collections_with_skips.items():
+            logger.info(f"\n📁 {collection_name}")
+            logger.info(f"   Movies you own ({len(data['owned_movies'])}):")
+            
+            # Show owned movies (truncate if more than 15)
+            owned_list = data["owned_movies"]
+            if len(owned_list) <= 15:
+                for movie in owned_list:
+                    logger.info(f"     - {movie}")
+            else:
+                for movie in owned_list[:15]:
+                    logger.info(f"     - {movie}")
+                logger.info(f"     ... and {len(owned_list) - 15} more")
+            
+            # Show skipped count with reason
+            if data["skip_reason"]:
+                logger.info(f"   ⚠️ {data['skipped_count']} missing movies were skipped ({data['skip_reason']})")
+            else:
+                logger.info(f"   ⚠️ {data['skipped_count']} missing movies were skipped by your filters")
+        
+        logger.info("=" * 50)
+        total_skipped = sum(data["skipped_count"] for data in collections_with_skips.values())
+        logger.info(f"Collections with skipped movies: {len(collections_with_skips)}")
+        logger.info(f"Total skipped movies: {total_skipped}")
+        logger.info("=" * 50)
+        logger.info("")
+    
+    # ========================================================================
+    # Missing Movies List (existing code)
+    # ========================================================================
     
     missing_movies = list(all_missing.values())
     missing_movies.sort(key=lambda x: x["collection_name"])
