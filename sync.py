@@ -451,9 +451,9 @@ async def main():
                 # Show actionable skips, mention if future skips were also skipped
                 if data["skipped_count"] > data["skipped_actionable"]:
                     future_skips = data["skipped_count"] - data["skipped_actionable"]
-                    logger.info(f"   ! {data['skipped_actionable']} missing movies were skipped by your filters ({future_skips} future/unreleased movies not shown)")
+                    logger.info(f"   ! {data['skipped_actionable']} missing movies were skipped by your filters{reason_text} ({future_skips} future/unreleased movies not shown)")
                 else:
-                    logger.info(f"   ! {data['skipped_actionable']} missing movies were skipped by your filters")
+                    logger.info(f"   ! {data['skipped_actionable']} missing movies were skipped by your filters{reason_text}")
         
         logger.info("=" * 50)
         total_actionable = sum(data["skipped_actionable"] for data in collections_with_skips.values())
