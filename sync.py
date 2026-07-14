@@ -274,6 +274,8 @@ async def main():
     logger.info(f"Daily limit: {config['daily_limit']}")
     logger.info(f"Auto-add: {config['auto_add']}")
     logger.info(f"Hide future releases: {config['hide_future']}")
+    logger.info(f"Min runtime: {config.get('min_runtime', 0)} minutes")
+    logger.info(f"Max collection size: {config.get('max_collection_size', 0)}")
     
     # Initialize clients
     radarr = RadarrClient(config["radarr_url"], config["radarr_api_key"])
